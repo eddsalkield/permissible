@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pydantic import BaseModel
 from typing import Any, Callable, Dict, Generator, Generic, List, Optional, \
-                   Type, TypeVar
+                   Type, TypeVar, Union
 
 from permissible.permissions import UnauthorisedError, Action, \
         BaseAccessType, Principal, Permission, has_permission
@@ -107,7 +107,9 @@ class AccessRecord(
     by post_process before being returned to the caller.
     """
     name: AccessName
-    permissions: List[Permission]
+    permissions: Union[
+            List[Permission], 
+            Callable[[BaseModel], List[Permission]]]
     input_schema: Type[InputSchema]
     output_schema: Type[OutputSchema]
     type_: AccessType
@@ -161,18 +163,39 @@ class Resource(Generic[AccessType]):
                 principals: List[Principal],
                 session: Optional[BaseSession] = None) -> OutputSchema:
             # Check permissions
-            if has_permission(principals, r.permissions) == Action.ALLOW:
-                processed_data = pre_process(r.input_schema.parse_obj(data))
+            if isinstance(r.permissions, list):
+                # Evaluate static permissions
+                if has_permission(principals, r.permissions) == Action.ALLOW:
+                    processed_data = pre_process(
+                            r.input_schema.parse_obj(data))
+                    if session is None:
+                        with self._backend.generate_session() as session:
+                            output_data: BaseModel = \
+                                self._backend(r.type_, processed_data, session)
+                    else:
+                        output_data = \
+                            self._backend(r.type_, processed_data, session)
+                    return r.output_schema.parse_obj(post_process(output_data))
+                else:
+                    raise UnauthorisedError
+            else:
+                # Evaluate dynamic permissions
+                processed_data = pre_process(
+                        r.input_schema.parse_obj(data))
                 if session is None:
                     with self._backend.generate_session() as session:
-                        output_data: BaseModel = \
+                        output_data = \
                             self._backend(r.type_, processed_data, session)
+                        if has_permission(principals, r.permissions(
+                                output_data)) != Action.ALLOW:
+                            raise UnauthorisedError
                 else:
                     output_data = \
                         self._backend(r.type_, processed_data, session)
+                    if has_permission(principals, r.permissions(
+                            output_data)) != Action.ALLOW:
+                        raise UnauthorisedError
                 return r.output_schema.parse_obj(post_process(output_data))
-            else:
-                raise UnauthorisedError
 
         return access
 
