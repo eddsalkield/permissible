@@ -1,16 +1,73 @@
 from typing import Any, Callable, Dict, Generator, Generic, List, Optional, \
-                   Type, TypeVar
+                   Type, TypeVar, Union
 from contextlib import contextmanager
 
 from permissible.core import BaseSession
 from permissible.crud.core import CRUDBackend, CreateSchema, ReadSchema, \
         UpdateSchema, DeleteSchema, CRUDAccessType, CRUDBackendAccessRecord
-from pydantic import BaseModel, create_model, BaseConfig
+from pydantic import BaseModel, create_model, BaseConfig, validator
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy_filters import apply_filters
+
+from enum import Enum
+import uuid
+
+class ValueOperation(Enum):
+    equal = '=='
+    equal_alt = 'eq'
+    not_equal = '!='
+    not_equal_alt = 'ne'
+    greater_than = '>'
+    greater_than_alt = 'gt'
+    less_than = '<'
+    less_than_alt = 'lt'
+    greater_than_or_eq = '>='
+    greater_than_or_eq_alt = 'ge'
+    less_than_or_eq = '<='
+    less_than_or_eq_alt = 'le'
+    like = 'like'
+    ilike = 'ilike'
+    not_ilike = 'not_ilike'
+    in_ = 'in'
+    not_in = 'not_in'
+    any_ = 'any'
+    not_any = 'not_any'
+
+class NullOperation(Enum):
+    is_null = 'is_null'
+    is_not_null = 'is_not_null'
+
+class QuerySchema(BaseModel):
+    class Filter(BaseModel):
+        field: str
+        op: Union[NullOperation, ValueOperation]
+        value: Union[str, type(...)] = ...
+        class Config:
+            extra = 'forbid'
+            arbitrary_types_allowed = True
+        @validator('value', always = True)
+        def value_is_none(cls, value, values):
+            if 'op' in values:
+                operation = values['op']
+            else:
+                raise ValueError('op must be provided')
+            if isinstance(operation, NullOperation):
+                if value != ...:
+                    raise ValueError(f'For this operation {operation} value must be ...')
+                else:
+                    return value
+            else:
+                if value == ...:
+                    raise ValueError(f'For this operation {operation} value must not be ...')
+                else:
+                    return value
+    
+    #Need to allow for booleans!!!
+    filter_spec: List[Filter] = []
+
 
 
 # TODO: get from webplatform helpers
@@ -84,6 +141,8 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
             return data
 
         def read(session: Session, data: QuerySchema) -> List[BaseModel]:
+            query_obj = session.query(Model)
+            apply_filters(query_obj, data.filter_spec)
             print(f'Reading {data}')
             return data
 
