@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from permissible.core import BaseSession
 from permissible.crud.core import CRUDBackend, CreateSchema, ReadSchema, \
         UpdateSchema, DeleteSchema, CRUDAccessType, CRUDBackendAccessRecord
-from pydantic import BaseModel, create_model, BaseConfig, validator
+from pydantic import BaseModel, create_model, BaseConfig, validator, root_validator
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
@@ -64,9 +64,18 @@ class QuerySchema(BaseModel):
                     raise ValueError(f'For this operation {operation} value must not be ...')
                 else:
                     return value
+        @root_validator
+        def convert_enums(cls, values):
+            operation = values['op']
+
+            values['op'] = operation.value
+
+            return values
     
     #Need to allow for booleans!!!
     filter_spec: List[Filter] = []
+    #sort_spec
+    #pagination_spec
 
 
 
@@ -98,6 +107,13 @@ class AlreadyExistsError(ValueError):
     def __init__(self, *args, **kwargs):
         super().__init__('Table record already exists', *args, **kwargs)
 
+class MultipleRecordsError(ValueError):
+    def __init__(self, *args, **kwargs):
+        super().__init__('Table record non unique', *args, **kwargs)
+
+class NotFoundError(ValueError):
+    def __init__(self, *args, **kwargs):
+        super().__init__('Table record not found', *args, **kwargs)
 
 class ORMConfig(BaseConfig):
     orm_mode = True
@@ -122,7 +138,6 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
 
         self.SessionLocal = SessionLocal
         self.Model = Model
-        # Sets orm_mode=True by default
         self.Schema = sqlalchemy_to_pydantic(Model)
         self.primary_keys: Dict[str, Any] = get_primary_keys_from_table(Model)
 
@@ -132,31 +147,47 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
 
         def create(session: Session, data: BaseModel) -> BaseModel:
             # TODO: do we need to cast data to self.Schema here?
-            # Test if record with matching primary keys already exists
-            if len(self._get_by_primary_keys(session, data)) != 1:
+            results = self._get_by_primary_keys(session, data.dict())
+            if len(results) == 1:
                 raise AlreadyExistsError()
-            # Create record in session
-            model = self.Model(data.dict())
+            elif len(results) > 1:
+                raise MultipleRecordsError()
+            model = self.Model(**data.dict())
             session.add(model)
-            return data
+            return self.Schema.from_orm(model)
 
         def read(session: Session, data: QuerySchema) -> List[BaseModel]:
             query_obj = session.query(Model)
-            apply_filters(query_obj, data.filter_spec)
-            print(f'Reading {data}')
-            return data
+            filtered_query_obj = apply_filters(query_obj, data.dict()['filter_spec']).all()
+            filtered_schema_obj = [self.Schema.from_orm(i) for i in filtered_query_obj]
+            return filtered_schema_obj
 
         def update(session: Session, data: BaseModel) -> BaseModel:
-            model = self._get_by_primary_keys(session, data)
+            results = self._get_by_primary_keys(session, data.dict())
+            if len(results) == 0:
+                raise NotFoundError()
+            elif len(results) > 1:
+                raise MultipleRecordsError()
+            model = results[0]
             for item, value in data.dict().items():
                 setattr(model, item, value)
-            return self.Schema(model)
+            return self.Schema.from_orm(model)
 
         def delete(session: Session, data: BaseModel) -> None:
-            delete_args = self.DeleteSchema(**data.dict())
-            model = self._get_by_primary_keys(session, delete_args)
+            delete_args = self.DeleteSchema(**data.dict()).dict()
+            results = self._get_by_primary_keys(session, delete_args)
+            if len(results) == 0:
+                raise NotFoundError()
+            elif len(results) > 1:
+                raise MultipleRecordsError()
+            model = results[0]
             session.delete(model)
-
+        
+        self.create = create
+        self.update = update
+        self.read = read
+        self.delete = delete
+        """
         super().__init__(
             CRUDBackendAccessRecord[CreateSchema, CreateSchema, Session](
                 create_schema,
@@ -179,6 +210,7 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
                 delete,
                 CRUDAccessType.delete),
             )
+        """
 
     @contextmanager
     def generate_session(self) -> Generator[BaseSession, None, None]:
