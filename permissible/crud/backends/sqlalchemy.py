@@ -15,7 +15,16 @@ from sqlalchemy_filters import apply_filters
 from enum import Enum
 import uuid
 
-class ValueOperation(Enum):
+from pydantic import BaseModel, conlist
+from enum import Enum
+from typing import ForwardRef, List, Union, Any
+
+from pydantic import BaseModel, conlist
+from enum import Enum
+from typing import ForwardRef, List, Union, Any
+
+
+class BinOp(Enum):
     equal = '=='
     equal_alt = 'eq'
     not_equal = '!='
@@ -36,47 +45,57 @@ class ValueOperation(Enum):
     any_ = 'any'
     not_any = 'not_any'
 
-class NullOperation(Enum):
+
+class MonOp(Enum):
     is_null = 'is_null'
     is_not_null = 'is_not_null'
 
-class QuerySchema(BaseModel):
-    class Filter(BaseModel):
-        field: str
-        op: Union[NullOperation, ValueOperation]
-        value: Union[str, type(...)] = ...
-        class Config:
-            extra = 'forbid'
-            arbitrary_types_allowed = True
-        @validator('value', always = True)
-        def value_is_none(cls, value, values):
-            if 'op' in values:
-                operation = values['op']
-            else:
-                raise ValueError('op must be provided')
-            if isinstance(operation, NullOperation):
-                if value != ...:
-                    raise ValueError(f'For this operation {operation} value must be ...')
-                else:
-                    return value
-            else:
-                if value == ...:
-                    raise ValueError(f'For this operation {operation} value must not be ...')
-                else:
-                    return value
-        @root_validator
-        def convert_enums(cls, values):
-            operation = values['op']
 
-            values['op'] = operation.value
+class BinFilter(BaseModel):
+    field: str
+    op: BinOp
+    value: Any
+    class Config:
+        use_enum_values = True
 
-            return values
+class MonFilter(BaseModel):
+    field: str
+    op: MonOp
+    class Config:
+        use_enum_values = True
+
+AndFilter = ForwardRef('AndFilter')
+OrFilter = ForwardRef('OrFilter')
+NotFilter = ForwardRef('NotFilter')
+
+Filter = Union[BinFilter, MonFilter, AndFilter, OrFilter, NotFilter]
+
+class AndFilter(BaseModel):
+    class Config:
+        fields = {'and_': 'and'}
+    and_: conlist(Filter, min_items=1)
+
+
+class OrFilter(BaseModel):
+    class Config:
+        fields = {'or_': 'or'}
+    or_: conlist(Filter, min_items=1)
+
+
+class NotFilter(BaseModel):
+    class Config:
+        fields = {'not_': 'not'}
+    not_: conlist(Filter, min_items=1, max_items=1)
+
+AndFilter.update_forward_refs()
+OrFilter.update_forward_refs()
+NotFilter.update_forward_refs()
     
-    #Need to allow for booleans!!!
-    filter_spec: List[Filter] = []
+
+class QuerySchema(BaseModel):
+    filter_spec: List[Filter]
     #sort_spec
     #pagination_spec
-
 
 
 # TODO: get from webplatform helpers
@@ -100,6 +119,8 @@ def get_primary_keys_from_table(Table) -> Dict[str, Any]:
         else:
             primary_keys[primary_key.name] = python_type
     return primary_keys
+
+
 
 
 # Custom exceptions
@@ -140,13 +161,13 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
         self.Model = Model
         self.Schema = sqlalchemy_to_pydantic(Model)
         self.primary_keys: Dict[str, Any] = get_primary_keys_from_table(Model)
-
         self.DeleteSchema = create_model(
             f'{Model.__name__}.Delete', __config__=ORMConfig,
             **{n: (t, ...) for n, t in self.primary_keys.items()})  # type: ignore
-
-        def create(session: Session, data: BaseModel) -> BaseModel:
-            # TODO: do we need to cast data to self.Schema here?
+        class OutputQuerySchema(BaseModel):
+            results: List[self.Schema]
+        self.OutputQuerySchema = OutputQuerySchema
+        def create(session: Session, data: self.Schema) -> BaseModel:
             results = self._get_by_primary_keys(session, data.dict())
             if len(results) == 1:
                 raise AlreadyExistsError()
@@ -159,10 +180,9 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
         def read(session: Session, data: QuerySchema) -> List[BaseModel]:
             query_obj = session.query(Model)
             filtered_query_obj = apply_filters(query_obj, data.dict()['filter_spec']).all()
-            filtered_schema_obj = [self.Schema.from_orm(i) for i in filtered_query_obj]
-            return filtered_schema_obj
+            return OutputQuerySchema(results = [self.Schema.from_orm(i) for i in filtered_query_obj])
 
-        def update(session: Session, data: BaseModel) -> BaseModel:
+        def update(session: Session, data: self.Schema) -> BaseModel:
             results = self._get_by_primary_keys(session, data.dict())
             if len(results) == 0:
                 raise NotFoundError()
@@ -173,7 +193,7 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
                 setattr(model, item, value)
             return self.Schema.from_orm(model)
 
-        def delete(session: Session, data: BaseModel) -> None:
+        def delete(session: Session, data: self.DeleteSchema) -> None:
             delete_args = self.DeleteSchema(**data.dict()).dict()
             results = self._get_by_primary_keys(session, delete_args)
             if len(results) == 0:
@@ -182,35 +202,36 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
                 raise MultipleRecordsError()
             model = results[0]
             session.delete(model)
+            return self.Schema.from_orm(model)
         
         self.create = create
         self.update = update
         self.read = read
         self.delete = delete
-        """
+        
         super().__init__(
-            CRUDBackendAccessRecord[CreateSchema, CreateSchema, Session](
-                create_schema,
-                create_schema,
+            CRUDBackendAccessRecord[self.Schema, self.Schema, Session](
+                self.Schema,
+                self.Schema,
                 create,
                 CRUDAccessType.create),
-            CRUDBackendAccessRecord[ReadSchema, ReadSchema, Session](
-                read_schema,
-                read_schema,
+            CRUDBackendAccessRecord[QuerySchema, OutputQuerySchema, Session](
+                QuerySchema,
+                OutputQuerySchema,
                 read,
                 CRUDAccessType.read),
-            CRUDBackendAccessRecord[UpdateSchema, UpdateSchema, Session](
-                update_schema,
-                update_schema,
+            CRUDBackendAccessRecord[self.Schema, List[self.Schema], Session](
+                self.Schema,
+                self.Schema,
                 update,
                 CRUDAccessType.update),
-            CRUDBackendAccessRecord[DeleteSchema, DeleteSchema, Session](
-                delete_schema,
-                delete_schema,
+            CRUDBackendAccessRecord[self.DeleteSchema, self.DeleteSchema, Session](
+                self.DeleteSchema,
+                self.Schema,
                 delete,
                 CRUDAccessType.delete),
             )
-        """
+    
 
     @contextmanager
     def generate_session(self) -> Generator[BaseSession, None, None]:

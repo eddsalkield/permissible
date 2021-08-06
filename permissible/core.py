@@ -88,8 +88,10 @@ class Backend(Generic[AccessType, Session]):
 # Resource definition
 
 AccessName = str
-BaseSession = Any
 
+class BaseSession:
+    def commit(self):
+        raise NotImplementedError('Subclass implements this')
 
 @dataclass(frozen=True)
 class AccessRecord(
@@ -172,6 +174,7 @@ class Resource(Generic[AccessType]):
                         with self._backend.generate_session() as session:
                             output_data: BaseModel = \
                                 self._backend(r.type_, processed_data, session)
+                            session.commit()
                     else:
                         output_data = \
                             self._backend(r.type_, processed_data, session)
@@ -189,6 +192,7 @@ class Resource(Generic[AccessType]):
                         if has_permission(principals, r.permissions(
                                 output_data)) != Action.ALLOW:
                             raise UnauthorisedError
+                        session.commit()
                 else:
                     output_data = \
                         self._backend(r.type_, processed_data, session)

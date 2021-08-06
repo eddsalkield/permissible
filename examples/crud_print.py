@@ -30,10 +30,9 @@ class CreateProfile(BaseModel):
 
 
 # Create the profile backend
-ProfileBackend = \
-        PrintCRUDBackend[Profile, Profile,
-                         Profile, Profile](
-            Profile, Profile, Profile, Profile)
+ProfileBackend = PrintCRUDBackend(
+    Profile, Profile, Profile, Profile
+)
 
 # Create the profile resource
 ProfileResource = CRUDResource(
