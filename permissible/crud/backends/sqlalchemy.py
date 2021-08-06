@@ -53,6 +53,7 @@ class MonOp(Enum):
 
 class BinFilter(BaseModel):
     field: str
+    # TODO Make enum of available fields
     op: BinOp
     value: Any
     class Config:
@@ -60,6 +61,7 @@ class BinFilter(BaseModel):
 
 class MonFilter(BaseModel):
     field: str
+    # TODO Make enum of available fields
     op: MonOp
     class Config:
         use_enum_values = True

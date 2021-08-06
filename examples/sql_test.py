@@ -1,11 +1,4 @@
 from permissible.crud.backends.sqlalchemy import QuerySchema, AlreadyExistsError
-
-
-
-#print(QuerySchema(filter_spec = filter_spec))
-
-
-
 from pydantic import BaseModel
 from typing import Callable, Generator, Optional, Type
 from contextlib import contextmanager
@@ -13,11 +6,9 @@ from contextlib import contextmanager
 from permissible import CRUDResource, SQLAlchemyCRUDBackend, \
         Create, Read, Update, Delete, Action, Permission, Principal
 
-
 from sqlalchemy.ext.declarative import DeclarativeMeta, declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, String, Text, Column, Integer
-
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 # In this example, we define a Profile resource, which is accessible
 # through admin and restricted accesses
@@ -101,11 +92,6 @@ try:
             session=None)
 except AlreadyExistsError:
     pass
-"""
-Session opened
-Creating full_name='Johnny English' age=58
-Session closed
-"""
 
 # Invoke restricted_create to create a new profile as an unprivileged user
 try:
@@ -138,9 +124,3 @@ test = ProfileResource.read(
     principals=[Principal('group', 'admin')]
 )
 print(test)
-"""
-Session opened
-Creating full_name='Mr. Bean' age=23
-Session closed
-"""
-
