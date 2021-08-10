@@ -1,27 +1,13 @@
-from typing import Any, Callable, Dict, Generator, Generic, List, Optional, \
-                   Type, TypeVar, Union
+from typing import Any, Dict, Generator, List, Union, ForwardRef
 from contextlib import contextmanager
-
 from permissible.core import BaseSession
-from permissible.crud.core import CRUDBackend, CreateSchema, ReadSchema, \
-        UpdateSchema, DeleteSchema, CRUDAccessType, CRUDBackendAccessRecord
-from pydantic import BaseModel, create_model, BaseConfig, validator, root_validator
+from permissible.crud.core import CRUDBackend, CRUDAccessType, CRUDBackendAccessRecord
+from pydantic import BaseModel, create_model, BaseConfig, conlist
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 from sqlalchemy import inspect
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session
 from sqlalchemy_filters import apply_filters
-
 from enum import Enum
-import uuid
-
-from pydantic import BaseModel, conlist
-from enum import Enum
-from typing import ForwardRef, List, Union, Any
-
-from pydantic import BaseModel, conlist
-from enum import Enum
-from typing import ForwardRef, List, Union, Any
 
 
 class BinOp(Enum):
@@ -169,6 +155,7 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
         class OutputQuerySchema(BaseModel):
             results: List[self.Schema]
         self.OutputQuerySchema = OutputQuerySchema
+
         def create(session: Session, data: self.Schema) -> BaseModel:
             results = self._get_by_primary_keys(session, data.dict())
             if len(results) == 1:
@@ -236,7 +223,7 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
     
 
     @contextmanager
-    def generate_session(self) -> Generator[BaseSession, None, None]:
+    def generate_session(self) -> Generator[Session, None, None]:
         """
         Generate a new session in case the user didn't specify one yet
         """
