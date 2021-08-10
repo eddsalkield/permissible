@@ -51,6 +51,24 @@ class CreateSchema(BaseModel):
             'job_try': '_job_try'
         }
 
+class UpdateSchema(BaseModel):
+    job_id: str
+    function: Optional[str] = None
+    queue_name: Optional[str] = None
+    defer_until: Optional[datetime] = None
+    defer_by: Optional[Union[int, float, timedelta]] = None
+    expires: Optional[Union[int, float, timedelta]] = None
+    job_try: Optional[int] = None
+    class Config:
+        fields = {
+            'job_id': '_job_id',
+            'queue_name': '_queue_name',
+            'defer_until': '_defer_until',
+            'defer_by': '_defer_by',
+            'expires': '_expires',
+            'job_try': '_job_try'
+        }
+
 class ResultSchema:
     pass
 
@@ -75,11 +93,13 @@ async def job_to_schema(job):
     output_details['job_try'] = info.job_try
     output_details['enqueue_time'] = info.enqueue_time
     output_details['score'] = info.score
-    return output_details
+    return JobSchema.parse_obj(output_details)
 
 class PoolJobNotFound(ValueError):
     pass
 
+class PoolJobCompleted(ValueError):
+    pass
 
 
 class ARQBackend(CRUDBackend[ArqRedis]):
@@ -104,45 +124,54 @@ class ARQBackend(CRUDBackend[ArqRedis]):
         async def create(pool: ArqRedis, data: CreateSchema) -> JobSchema:
             job_details = await pool.enqueue_job(**data.dict(by_alias=True))
             self.jobs[job_details.job_id] = job_details
-            output_details = await job_to_schema(job_details)
-            return JobSchema.parse_obj(output_details)
+            return await job_to_schema(job_details)
 
         async def read(pool: ArqRedis, job_id: str) -> JobSchema:
-            pool_jobs = await pool.zrange(pool.default_queue_name, withscores=True)
-            active_pool_job_index = {job_id: job for job_id, job in pool_jobs}
-            if job_id in active_pool_job_index and job_id not in self.jobs:
-                raise ValueError(f'{job_id} was present in pool job index but not in internal pool!!')
-            elif job_id not in self.jobs:
-                raise PoolJobNotFound()
+            self.__check_job_present__(pool, job_id)
             job = self.jobs[job_id]
-            output = await job_to_schema(job)
-            return JobSchema.parse_obj(output)
+            return await job_to_schema(job)
+        
+        async def update(pool: ArqRedis, data: UpdateSchema) -> JobSchema:
+            update_data = data.dict(by_alias=True)
+            job_id = update_data['_job_id']
+            self.__check_job_present__(pool, job_id)
+            job = self.job[job_id]
+            abort_completed = await job.abort()
+            if not abort_completed:
+                raise PoolJobCompleted()
+            job_details = await pool.enqueue_job(**update_data)
+            self.jobs[job_details.job_id] = job_details
+            return await job_to_schema(job_details)
         
         async def delete(pool: ArqRedis, job_id: str):
-            pool_jobs = await pool.zrange(pool.default_queue_name, withscores=True)
-            active_pool_job_index = {job_id: job for job_id, job in pool_jobs}
-            if job_id in active_pool_job_index and job_id not in self.jobs:
-                raise ValueError(f'{job_id} was present in pool job index but not in internal pool!!')
-            elif job_id not in self.jobs:
-                raise PoolJobNotFound()
+            self.__check_job_present__(pool, job_id)
             job = self.jobs[job_id]
-            job.abort()
+            abort_completed = await job.abort()
+            if not abort_completed:
+                raise PoolJobCompleted()
             return None
         
         self.create = create
         self.read = read
         self.delete = delete
 
+    async def __check_job_present__(self, pool: ArqRedis, job_id: str):
+        pool_jobs = await pool.zrange(pool.default_queue_name, withscores=True)
+        active_pool_job_index = {job_id: job for job_id, job in pool_jobs}
+        if job_id in active_pool_job_index and job_id not in self.jobs:
+            raise ValueError(f'{job_id} was present in pool job index but not in internal pool!!')
+        elif job_id not in self.jobs:
+            raise PoolJobNotFound()
 
 
 
 
     @contextmanager
-    def generate_session(self) -> Generator[ArqRedis, None, None]:
+    async def generate_session(self) -> Generator[ArqRedis, None, None]:
         """
         Generate a new session in case the user didn't specify one yet
         """
-        session = create_pool(**self.pool_settings)
+        session = await create_pool(**self.pool_settings)
         try:
             yield session
         finally:
