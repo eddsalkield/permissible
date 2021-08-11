@@ -1,6 +1,7 @@
 from arq import create_pool
-from permissible.crud.backends.arq import ARQBackend, CreateSchema, ARQSessionMaker, GetSchema, ArqSessionAbortFailure
+from permissible.crud.backends.arq import ARQBackend, CreateSchema, ARQSessionMaker, GetSchema, ArqSessionAbortFailure, JobPromiseModel
 import asyncio
+from permissible import CRUDResource, Create, Permission, Action, Principal
 from arq.connections import RedisSettings
 import time
 from random import random
@@ -13,15 +14,30 @@ async def test_func(ctx):
     return list_of_list
 
 
-
-
 async def main():
     pool = await create_pool()
 
     sessionmaker = ARQSessionMaker(pool=pool)
     backend = ARQBackend(sessionmaker)
     session = sessionmaker()
+    ProfileResource = CRUDResource(
+        # Admin interface to create profiles
+        Create[CreateSchema, JobPromiseModel](
+            name='admin_create',
+            permissions=[Permission(Action.ALLOW, Principal('group', 'admin'))],
+            input_schema=CreateSchema,
+            output_schema=JobPromiseModel
+        ),
+        backend=backend
+    )
 
+    ProfileResource.create(
+        'admin_create',
+        {'function': 'test_func'},
+        principals=[Principal('group', 'admin')],
+        session=session
+    )
+    """
     data = CreateSchema(function='test_func', defer_by=1)
     create_data = await backend.create(session = session, data = data)
     job_id = create_data.job_id
@@ -49,7 +65,7 @@ async def main():
 
     print(read_data)
 
-
+    """
 class WorkerSettings:
     functions = [test_func]
     allow_abort_jobs = True

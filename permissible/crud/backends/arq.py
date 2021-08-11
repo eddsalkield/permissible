@@ -81,6 +81,9 @@ class PoolJobNotFound(ValueError):
 class PoolJobCompleted(ValueError):
     pass
 
+class PoolJobAlreadyExists(ValueError):
+    pass
+
 class ArqSessionAbortFailure(ValueError):
     pass
 
@@ -169,6 +172,7 @@ class JobResultModel(JobDefModel):
     finish_time: datetime
     queue_name: str
 
+JobModel = Union[JobPromiseModel, JobDefModel, JobResultModel]
 
 class ARQSession(BaseSession):
     pool: ArqRedis
@@ -255,7 +259,7 @@ class ARQSessionMaker:
 
 
 class ARQBackend(CRUDBackend[ArqRedis]):
-    pool_settings: Dict[str, Any]
+    session_maker: ARQSessionMaker
     def __init__(
         self,
         session_maker: ARQSessionMaker
@@ -265,8 +269,12 @@ class ARQBackend(CRUDBackend[ArqRedis]):
             job_data = data.dict(by_alias=True)
             if job_data['_job_id'] is None:
                 job_data['_job_id'] = str(uuid.uuid4())
+
             job_id = job_data['_job_id']
             return_model = CreateSchema.parse_obj(job_data)
+            result = await session.query(return_model.job_id)
+            if result is not None:
+                raise PoolJobAlreadyExists()
             session.add(return_model)
             return await session.query(job_id)
 

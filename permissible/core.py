@@ -7,6 +7,15 @@ from typing import Any, Callable, Dict, Generator, Generic, List, Optional, \
 
 from permissible.permissions import UnauthorisedError, Action, \
         BaseAccessType, Principal, Permission, has_permission
+from asyncio import iscoroutinefunction
+
+# From fastapi users
+async def run_handler(handler: Callable, *args, **kwargs):
+    if iscoroutinefunction(handler):
+        await handler(*args, **kwargs)
+    else:
+        handler(*args, **kwargs)
+
 
 
 AccessType = TypeVar('AccessType', bound=BaseAccessType)
@@ -168,8 +177,7 @@ class Resource(Generic[AccessType]):
             if isinstance(r.permissions, list):
                 # Evaluate static permissions
                 if has_permission(principals, r.permissions) == Action.ALLOW:
-                    processed_data = pre_process(
-                            r.input_schema.parse_obj(data))
+                    processed_data = pre_process(r.input_schema.parse_obj(data))
                     if session is None:
                         with self._backend.generate_session() as session:
                             output_data: BaseModel = \
