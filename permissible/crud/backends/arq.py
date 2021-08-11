@@ -1,11 +1,16 @@
 from arq import create_pool
 from arq.connections import RedisSettings, ArqRedis, SSLContext
 from arq.jobs import Job
-from typing import Any, Optional, Union, Dict, Callable, Generator
+from permissible.core import BaseSession
+from typing import Any, Optional, Union, Dict, Callable, Generator, List
 from datetime import datetime, timedelta
 from pydantic import BaseModel
-from permissible.crud.core import CRUDBackend
+from permissible.crud.core import CRUDBackend, CRUDAccessType, CRUDBackendAccessRecord
 from contextlib import contextmanager
+import uuid
+from time import time
+from dataclasses import dataclass, asdict
+from arq.jobs import deserialize_job, JobDef, JobResult
 """
 Analogies
 
@@ -27,8 +32,6 @@ arq.job.Job.abort() will abort a job if it’s already running or
 prevent it being run if it’s currently in the queue.
 
 WorkerSettings defines functions available on startup
-
-
 
 
 """
@@ -69,31 +72,8 @@ class UpdateSchema(BaseModel):
             'job_try': '_job_try'
         }
 
-class ResultSchema:
-    pass
-
-class JobSchema(BaseModel):
+class GetSchema(BaseModel):
     job_id: str
-    status: str
-    function: str
-    job_try: Optional[int]
-    enqueue_time: datetime
-    score: Optional[int]
-    #results_info: Optional[ResultSchema]#Optional[arq.jobs.JobResult]
-
-
-async def job_to_schema(job):
-    info = await job.info()
-    status = await job.status()
-    #result_info = await job_details.result_info()
-    output_details = {}
-    output_details['job_id'] = job.job_id
-    output_details['status'] = status.value
-    output_details['function'] = info.function
-    output_details['job_try'] = info.job_try
-    output_details['enqueue_time'] = info.enqueue_time
-    output_details['score'] = info.score
-    return JobSchema.parse_obj(output_details)
 
 class PoolJobNotFound(ValueError):
     pass
@@ -101,69 +81,225 @@ class PoolJobNotFound(ValueError):
 class PoolJobCompleted(ValueError):
     pass
 
+class ArqSessionAbortFailure(ValueError):
+    pass
+
+def as_int(f: float) -> int:
+    return int(round(f))
+
+def timestamp_ms() -> int:
+    return as_int(time() * 1000)
+async def abort_in_pool(pool, job_id) -> bool:
+    results = await pool.all_job_results()
+    results_found = {i.job_id: i for i in results}
+    await pool.zadd('arq:abort', timestamp_ms(), job_id)
+    return job_id not in results_found
+
+async def get_info_from_pool(pool, job_id, queue_name) -> Optional[JobDef]:
+    results = await pool.all_job_results()
+    results_found = {i.job_id: i for i in results}
+    if job_id in results_found:
+        info = results_found[job_id]
+    else:
+        info = None
+    if not info:
+        v = await pool.get('arq:job:' + job_id, encoding=None)
+
+        if v:
+            info = deserialize_job(v)
+    if info:
+        info.score = await pool.zscore(queue_name, job_id)
+    return info
+
+async def get_status_from_pool(pool, job_id, queue_name) -> str:
+    """
+    Status of the job.
+    """
+    if await pool.exists('arq:result:' + job_id):
+        return 'complete'
+    elif await pool.exists('arq:in-progress:' + job_id):
+        return 'in_progress'
+    else:
+        score = await pool.zscore(queue_name, job_id)
+        if not score:
+            return 'not_found'
+        return 'deferred' if score > timestamp_ms() else 'queued'
+
+
+@dataclass
+class Add:
+    create_model: CreateSchema
+@dataclass
+class Delete:
+    job_id: str
+
+@dataclass
+class JobPromise:
+    function:str
+    job_id: Optional[str] = None
+    queue_name: Optional[str] = None
+    defer_until: Optional[datetime] = None
+    defer_by: Optional[Union[int, float, timedelta]] = None
+    expires: Optional[Union[int, float, timedelta]] = None
+    job_try: Optional[int] = None
+
+
+
+class JobPromiseModel(BaseModel):
+    function: str
+    job_id: str
+
+class JobDefModel(JobPromiseModel):
+    status: str
+    job_try: Optional[int]
+    enqueue_time: datetime
+    score: Optional[int]
+
+class JobResultModel(JobDefModel):
+    success: bool
+    result: Any
+    start_time: datetime
+    finish_time: datetime
+    queue_name: str
+
+
+class ARQSession(BaseSession):
+    pool: ArqRedis
+    operations: List[Union[Add, Delete]]
+    def __init__(self, pool):
+        self.pool = pool
+        self.operations = []
+    
+    def add(self, job_create: CreateSchema):
+        self.operations.append(Add(create_model = job_create))
+        return JobPromiseModel(function = job_create.function, job_id = job_create.job_id)
+    
+    def delete(self, job_id):
+        self.operations.append(Delete(job_id = job_id))
+    
+    async def query(self, job_id, queue_name = None):
+        if queue_name is None:
+            queue_name = self.pool.default_queue_name
+
+        info = None
+        status = None
+        applicable_ops = []
+        for operation in self.operations:
+            if isinstance(operation, Add):
+                op_job_id = operation.create_model.job_id
+            else:
+                op_job_id = operation.job_id
+            if op_job_id == job_id:
+                applicable_ops.append(operation)
+        if applicable_ops != []:
+            last_operation = applicable_ops[-1]
+            if isinstance(last_operation, Add):
+                last_dict = last_operation.create_model.dict()
+                info = JobPromise(last_dict['function'], job_id)
+                status = 'promise'
+            else:
+                info = ...
+                status = None
+
+        if info is None:
+            info = await get_info_from_pool(self.pool, job_id, queue_name)
+            status = await get_status_from_pool(self.pool, job_id, queue_name)
+        if info == ...:
+            info = None
+        
+        if isinstance(info, JobPromise):
+            return JobPromiseModel(**asdict(info))
+        elif isinstance(info, JobDef):
+            info_dict = asdict(info)
+            info_dict['status'] = status
+            info_dict['job_id'] = job_id
+            return JobDefModel(**info_dict)
+        elif isinstance(info, JobResult):
+            info_dict = asdict(info)
+            info_dict['status'] = status
+            info_dict['job_id'] = job_id
+            return JobResultModel(**info_dict)
+
+    async def commit(self):
+        for operation in self.operations:
+            if isinstance(operation, Add):
+                await self.pool.enqueue_job(**operation.create_model.dict(by_alias=True))
+            elif isinstance(operation, Delete):
+                abort_completed = await abort_in_pool(self.pool, operation.job_id)
+                if not abort_completed:
+                    raise ArqSessionAbortFailure()
+            else:
+                raise ValueError(f'Unknown operation {operation}')
+        self.operations = []
+    
+    def close(self):
+        self.operations = []
+
+class ARQSessionMaker:
+    def __init__(self, pool):
+        self.pool = pool
+    def __call__(self):
+        return ARQSession(self.pool)
+
 
 class ARQBackend(CRUDBackend[ArqRedis]):
     pool_settings: Dict[str, Any]
-    jobs: Dict[str, Job]
     def __init__(
         self,
-        redis_settings: Optional[RedisSettings] = None,
-        retry: int = 0, 
-        job_serializer: Optional[Callable[[Dict[str, Any]], bytes]] = None, 
-        job_deserializer: Optional[Callable[[bytes], Dict[str, Any]]] = None, 
-        default_queue_name: str = 'arq:queue'
+        session_maker: ARQSessionMaker
     ):
-        self.pool_settings = {
-            'settings_': redis_settings,
-            'retry': retry,
-            'job_serializer': job_serializer,
-            'job_deserializer': job_deserializer,
-            'default_queue_name': default_queue_name
-        }
-        self.jobs = {}
-        async def create(pool: ArqRedis, data: CreateSchema) -> JobSchema:
-            job_details = await pool.enqueue_job(**data.dict(by_alias=True))
-            self.jobs[job_details.job_id] = job_details
-            return await job_to_schema(job_details)
+        self.session_maker = session_maker
+        async def create(session: ARQSession, data: CreateSchema) -> JobPromiseModel:
+            job_data = data.dict(by_alias=True)
+            if job_data['_job_id'] is None:
+                job_data['_job_id'] = str(uuid.uuid4())
+            job_id = job_data['_job_id']
+            return_model = CreateSchema.parse_obj(job_data)
+            session.add(return_model)
+            return await session.query(job_id)
 
-        async def read(pool: ArqRedis, job_id: str) -> JobSchema:
-            self.__check_job_present__(pool, job_id)
-            job = self.jobs[job_id]
-            return await job_to_schema(job)
-        
-        async def update(pool: ArqRedis, data: UpdateSchema) -> JobSchema:
-            update_data = data.dict(by_alias=True)
-            job_id = update_data['_job_id']
-            self.__check_job_present__(pool, job_id)
-            job = self.job[job_id]
-            abort_completed = await job.abort()
-            if not abort_completed:
+        async def read(session: ARQSession, data: GetSchema) -> JobPromiseModel:
+            result = await session.query(data.job_id)
+            if result is None:
+                raise PoolJobNotFound()
+            return result
+                
+        async def delete(session: ARQSession, data: GetSchema):
+            result = await session.query(data.job_id)
+            if result is None:
+                raise PoolJobNotFound()
+            elif result.status == 'complete':
                 raise PoolJobCompleted()
-            job_details = await pool.enqueue_job(**update_data)
-            self.jobs[job_details.job_id] = job_details
-            return await job_to_schema(job_details)
+            session.delete(data.job_id)
+            return result
         
-        async def delete(pool: ArqRedis, job_id: str):
-            self.__check_job_present__(pool, job_id)
-            job = self.jobs[job_id]
-            abort_completed = await job.abort()
-            if not abort_completed:
-                raise PoolJobCompleted()
-            return None
+        async def update(session: ARQSession, data: UpdateSchema):
+            pass
         
         self.create = create
         self.read = read
         self.delete = delete
 
-    async def __check_job_present__(self, pool: ArqRedis, job_id: str):
-        pool_jobs = await pool.zrange(pool.default_queue_name, withscores=True)
-        active_pool_job_index = {job_id: job for job_id, job in pool_jobs}
-        if job_id in active_pool_job_index and job_id not in self.jobs:
-            raise ValueError(f'{job_id} was present in pool job index but not in internal pool!!')
-        elif job_id not in self.jobs:
-            raise PoolJobNotFound()
-
-
+        super().__init__(
+            CRUDBackendAccessRecord[CreateSchema, CreateSchema, ARQSession](
+                CreateSchema,
+                JobPromiseModel,
+                create,
+                CRUDAccessType.create
+            ),
+            CRUDBackendAccessRecord[GetSchema, JobPromiseModel, ARQSession](
+                GetSchema,
+                JobPromiseModel,
+                read,
+                CRUDAccessType.read
+            ),
+            CRUDBackendAccessRecord[GetSchema, JobPromiseModel, ARQSession](
+                GetSchema,
+                JobPromiseModel,
+                delete,
+                CRUDAccessType.delete
+            ),
+        )
 
 
     @contextmanager
@@ -171,14 +307,8 @@ class ARQBackend(CRUDBackend[ArqRedis]):
         """
         Generate a new session in case the user didn't specify one yet
         """
-        session = await create_pool(**self.pool_settings)
+        session = self.session_maker()
         try:
             yield session
         finally:
-
-            pass
-            # Await all jobs to be completed and then terminate pool?
-            #session.close()
-
-
-
+            session.close()
