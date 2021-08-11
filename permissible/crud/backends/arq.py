@@ -89,11 +89,18 @@ def as_int(f: float) -> int:
 
 def timestamp_ms() -> int:
     return as_int(time() * 1000)
+
 async def abort_in_pool(pool, job_id) -> bool:
     results = await pool.all_job_results()
     results_found = {i.job_id: i for i in results}
     await pool.zadd('arq:abort', timestamp_ms(), job_id)
-    return job_id not in results_found
+
+    if await pool.exists('arq:result:' + job_id):
+        status = 'complete'
+    elif await pool.exists('arq:in-progress:' + job_id):
+        status = 'in_progress'
+    abort_complete = not(status == 'in_progress' or status == 'complete')
+    return abort_complete
 
 async def get_info_from_pool(pool, job_id, queue_name) -> Optional[JobDef]:
     results = await pool.all_job_results()
@@ -165,17 +172,23 @@ class JobResultModel(JobDefModel):
 
 class ARQSession(BaseSession):
     pool: ArqRedis
-    operations: List[Union[Add, Delete]]
+    operations: Dict[str, Union[Add, Delete]]
     def __init__(self, pool):
         self.pool = pool
-        self.operations = []
+        self.operations = {}
     
     def add(self, job_create: CreateSchema):
-        self.operations.append(Add(create_model = job_create))
+        if job_create.job_id in self.operations:
+            self.operations[job_create.job_id].append(Add(create_model = job_create))
+        else:
+            self.operations[job_create.job_id] = [Add(create_model = job_create)]
         return JobPromiseModel(function = job_create.function, job_id = job_create.job_id)
     
     def delete(self, job_id):
-        self.operations.append(Delete(job_id = job_id))
+        if job_id in self.operations:
+            self.operations[job_id].append(Delete(job_id = job_id))
+        else:
+            self.operations[job_id] = [Delete(job_id = job_id)]
     
     async def query(self, job_id, queue_name = None):
         if queue_name is None:
@@ -183,16 +196,8 @@ class ARQSession(BaseSession):
 
         info = None
         status = None
-        applicable_ops = []
-        for operation in self.operations:
-            if isinstance(operation, Add):
-                op_job_id = operation.create_model.job_id
-            else:
-                op_job_id = operation.job_id
-            if op_job_id == job_id:
-                applicable_ops.append(operation)
-        if applicable_ops != []:
-            last_operation = applicable_ops[-1]
+        if job_id in self.operations:
+            last_operation = self.operations[job_id][-1]
             if isinstance(last_operation, Add):
                 last_dict = last_operation.create_model.dict()
                 info = JobPromise(last_dict['function'], job_id)
@@ -219,21 +224,28 @@ class ARQSession(BaseSession):
             info_dict['status'] = status
             info_dict['job_id'] = job_id
             return JobResultModel(**info_dict)
+        elif info is None:
+            return None
 
     async def commit(self):
-        for operation in self.operations:
-            if isinstance(operation, Add):
-                await self.pool.enqueue_job(**operation.create_model.dict(by_alias=True))
-            elif isinstance(operation, Delete):
-                abort_completed = await abort_in_pool(self.pool, operation.job_id)
-                if not abort_completed:
-                    raise ArqSessionAbortFailure()
-            else:
-                raise ValueError(f'Unknown operation {operation}')
-        self.operations = []
+        for job_id, operations in self.operations.items():
+            for operation in operations:
+                if isinstance(operation, Add):
+                    await self.pool.enqueue_job(**operation.create_model.dict(by_alias=True))
+                elif isinstance(operation, Delete):
+                    abort_completed = await abort_in_pool(self.pool, operation.job_id)
+                    if not abort_completed:
+                        raise ArqSessionAbortFailure(f'Job_id: {operation.job_id}')
+                else:
+                    raise ValueError(f'Unknown operation {operation}')
+        self.operations = {}
     
     def close(self):
-        self.operations = []
+        self.operations = {}
+    
+    def remove_operations(self, job_id):
+        self.operations.pop(job_id)
+
 
 class ARQSessionMaker:
     def __init__(self, pool):
@@ -268,7 +280,7 @@ class ARQBackend(CRUDBackend[ArqRedis]):
             result = await session.query(data.job_id)
             if result is None:
                 raise PoolJobNotFound()
-            elif result.status == 'complete':
+            elif hasattr(result,'status') and result.status == 'complete':
                 raise PoolJobCompleted()
             session.delete(data.job_id)
             return result
