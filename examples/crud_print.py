@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 from permissible import CRUDResource, PrintCRUDBackend, \
         Create, Read, Update, Delete, Action, Permission, Principal
-
+import asyncio
 # In this example, we define a Profile resource, which is accessible
 # through admin and restricted accesses
 # The admin accesses are accessible only to users in the admin group, and
@@ -55,27 +55,30 @@ ProfileResource = CRUDResource(
         ),
         backend=ProfileBackend
     )
+async def main():
+    # Invoke admin_create to create a new profile as an administrative user
+    await ProfileResource.create(
+            'admin_create',
+            {'full_name': 'Johnny English', 'age': 58},
+            principals=[Principal('group', 'admin')],
+            session=None)
+    """
+    Session opened
+    Creating full_name='Johnny English' age=58
+    Session closed
+    """
 
-# Invoke admin_create to create a new profile as an administrative user
-ProfileResource.create(
-        'admin_create',
-        {'full_name': 'Johnny English', 'age': 58},
-        principals=[Principal('group', 'admin')],
-        session=None)
-"""
-Session opened
-Creating full_name='Johnny English' age=58
-Session closed
-"""
+    # Invoke restricted_create to create a new profile as an unprivileged user
+    await ProfileResource.create(
+            'restricted_create',
+            {'full_name': 'Mr. Bean'},
+            principals=[Principal('group', 'user')],
+            session=None)
+    """
+    Session opened
+    Creating full_name='Mr. Bean' age=23
+    Session closed
+    """
 
-# Invoke restricted_create to create a new profile as an unprivileged user
-ProfileResource.create(
-        'restricted_create',
-        {'full_name': 'Mr. Bean'},
-        principals=[Principal('group', 'user')],
-        session=None)
-"""
-Session opened
-Creating full_name='Mr. Bean' age=23
-Session closed
-"""
+if __name__ == '__main__':
+    asyncio.run(main())

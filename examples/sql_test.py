@@ -10,6 +10,7 @@ from sqlalchemy.ext.declarative import DeclarativeMeta, declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, String, Text, Column, Integer
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
+import asyncio
 # In this example, we define a Profile resource, which is accessible
 # through admin and restricted accesses
 # The admin accesses are accessible only to users in the admin group, and
@@ -84,43 +85,47 @@ ProfileResource = CRUDResource(
     )
 
 # Invoke admin_create to create a new profile as an administrative user
-try:
-    ProfileResource.create(
-            'admin_create',
-            {'full_name': 'Johnny English', 'age': 58},
-            principals=[Principal('group', 'admin')],
-            session=None)
-except AlreadyExistsError:
-    pass
+async def main():
+    try:
+        await ProfileResource.create(
+                'admin_create',
+                {'full_name': 'Johnny English', 'age': 58},
+                principals=[Principal('group', 'admin')],
+                session=None)
+    except AlreadyExistsError:
+        pass
 
-# Invoke restricted_create to create a new profile as an unprivileged user
-try:
-    ProfileResource.create(
-            'restricted_create',
-            {'full_name': 'Mr. Bean'},
-            principals=[Principal('group', 'user')],
-            session=None)
-except AlreadyExistsError:
-    pass
+    # Invoke restricted_create to create a new profile as an unprivileged user
+    try:
+        await ProfileResource.create(
+                'restricted_create',
+                {'full_name': 'Mr. Bean'},
+                principals=[Principal('group', 'user')],
+                session=None)
+    except AlreadyExistsError:
+        pass
 
-test = ProfileResource.read(
-    'admin_read', 
-    {'filter_spec': [{'field': 'full_name', 'op': '==', 'value': 'Mr. Bean'}]},
-    principals=[Principal('group', 'admin')]
-)
-test = ProfileResource.update(
-    'admin_update', 
-    {'full_name': 'Johnny English', 'age': 20},
-    principals=[Principal('group', 'admin')]
-)
-test = ProfileResource.delete(
-    'admin_delete', 
-    {'full_name': 'Johnny English'},
-    principals=[Principal('group', 'admin')]
-)
-test = ProfileResource.read(
-    'admin_read', 
-    {'filter_spec': [{'field': 'full_name', 'op': '==', 'value': 'Mr. Bean'}]},
-    principals=[Principal('group', 'admin')]
-)
-print(test)
+    test = await ProfileResource.read(
+        'admin_read', 
+        {'filter_spec': [{'field': 'full_name', 'op': '==', 'value': 'Mr. Bean'}]},
+        principals=[Principal('group', 'admin')]
+    )
+    test = await ProfileResource.update(
+        'admin_update', 
+        {'full_name': 'Johnny English', 'age': 20},
+        principals=[Principal('group', 'admin')]
+    )
+    test = await ProfileResource.delete(
+        'admin_delete', 
+        {'full_name': 'Johnny English'},
+        principals=[Principal('group', 'admin')]
+    )
+    test = await ProfileResource.read(
+        'admin_read', 
+        {'filter_spec': [{'field': 'full_name', 'op': '==', 'value': 'Mr. Bean'}]},
+        principals=[Principal('group', 'admin')]
+    )
+    print(test)
+
+if __name__ == '__main__':
+    asyncio.run(main())

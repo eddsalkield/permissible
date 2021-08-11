@@ -181,14 +181,14 @@ class ARQSession(BaseSession):
         self.pool = pool
         self.operations = {}
     
-    def add(self, job_create: CreateSchema):
+    async def add(self, job_create: CreateSchema):
         if job_create.job_id in self.operations:
             self.operations[job_create.job_id].append(Add(create_model = job_create))
         else:
             self.operations[job_create.job_id] = [Add(create_model = job_create)]
         return JobPromiseModel(function = job_create.function, job_id = job_create.job_id)
     
-    def delete(self, job_id):
+    async def delete(self, job_id):
         if job_id in self.operations:
             self.operations[job_id].append(Delete(job_id = job_id))
         else:
@@ -244,10 +244,10 @@ class ARQSession(BaseSession):
                     raise ValueError(f'Unknown operation {operation}')
         self.operations = {}
     
-    def close(self):
+    async def close(self):
         self.operations = {}
     
-    def remove_operations(self, job_id):
+    async def remove_operations(self, job_id):
         self.operations.pop(job_id)
 
 
@@ -275,7 +275,7 @@ class ARQBackend(CRUDBackend[ArqRedis]):
             result = await session.query(return_model.job_id)
             if result is not None:
                 raise PoolJobAlreadyExists()
-            session.add(return_model)
+            await session.add(return_model)
             return await session.query(job_id)
 
         async def read(session: ARQSession, data: GetSchema) -> JobPromiseModel:
@@ -296,9 +296,9 @@ class ARQBackend(CRUDBackend[ArqRedis]):
         async def update(session: ARQSession, data: UpdateSchema):
             pass
         
-        self.create = create
-        self.read = read
-        self.delete = delete
+        #self.create = create
+        #self.read = read
+        #self.delete = delete
 
         super().__init__(
             CRUDBackendAccessRecord[CreateSchema, CreateSchema, ARQSession](
@@ -323,7 +323,7 @@ class ARQBackend(CRUDBackend[ArqRedis]):
 
 
     @contextmanager
-    async def generate_session(self) -> Generator[ArqRedis, None, None]:
+    def generate_session(self) -> Generator[ArqRedis, None, None]:
         """
         Generate a new session in case the user didn't specify one yet
         """

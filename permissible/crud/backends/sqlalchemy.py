@@ -192,12 +192,7 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
             model = results[0]
             session.delete(model)
             return self.Schema.from_orm(model)
-        
-        self.create = create
-        self.update = update
-        self.read = read
-        self.delete = delete
-        
+                
         super().__init__(
             CRUDBackendAccessRecord[self.Schema, self.Schema, Session](
                 self.Schema,

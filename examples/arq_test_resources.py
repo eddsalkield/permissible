@@ -31,12 +31,14 @@ async def main():
         backend=backend
     )
 
-    ProfileResource.create(
+    created = await ProfileResource.create(
         'admin_create',
         {'function': 'test_func'},
         principals=[Principal('group', 'admin')],
         session=session
     )
+    print(created)
+    await session.commit()
     """
     data = CreateSchema(function='test_func', defer_by=1)
     create_data = await backend.create(session = session, data = data)
