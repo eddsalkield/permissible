@@ -12,9 +12,6 @@ async def test_func(ctx):
         list_of_list = log10(abs(log10(random_3**random_3**random_3)))
     return list_of_list
 
-
-
-
 async def main():
     pool = await create_pool()
 
@@ -33,7 +30,7 @@ async def main():
     print(read_data)
     await session.commit()
     delete_data = await backend.delete(session=session, data = get_data)
-    while n<5:
+    while n<20:
         read_data = await backend.read(session = sessionmaker(), data = get_data)
         print(read_data)
         time.sleep(0.5)

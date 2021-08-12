@@ -1,18 +1,19 @@
 from arq import create_pool
-from permissible.crud.backends.arq import ARQBackend, CreateSchema, ARQSessionMaker, GetSchema, ArqSessionAbortFailure, JobPromiseModel
+from permissible.crud.backends.arq import ARQBackend, CreateSchema, ARQSessionMaker, GetSchema, ArqSessionAbortFailure, JobPromiseModel, JobModel, GetModel, PoolJobCompleted
 import asyncio
-from permissible import CRUDResource, Create, Permission, Action, Principal
+from permissible import CRUDResource, Create, Read, Update, Delete, Permission, Action, Principal
 from arq.connections import RedisSettings
 import time
 from random import random
 from math import log10
-
+from pydantic import BaseModel
+from typing import Optional, Any
+from datetime import datetime
 async def test_func(ctx):
     random_3 = 2*random()
     for i in range(20000000):
         list_of_list = log10(abs(log10(random_3**random_3**random_3)))
     return list_of_list
-
 
 async def main():
     pool = await create_pool()
@@ -26,48 +27,70 @@ async def main():
             name='admin_create',
             permissions=[Permission(Action.ALLOW, Principal('group', 'admin'))],
             input_schema=CreateSchema,
-            output_schema=JobPromiseModel
+            output_schema=GetModel
+        ),
+        Read[GetSchema, GetModel](
+            name='admin_read',
+            permissions=[Permission(Action.ALLOW, Principal('group', 'admin'))],
+            input_schema=GetSchema,
+            output_schema=GetModel
+        ),
+        Delete[GetSchema, GetModel](
+            name='admin_delete',
+            permissions=[Permission(Action.ALLOW, Principal('group', 'admin'))],
+            input_schema=GetSchema,
+            output_schema=GetModel
         ),
         backend=backend
     )
 
     created = await ProfileResource.create(
         'admin_create',
-        {'function': 'test_func'},
+        {'function': 'test_func', 'defer_by': 1},
         principals=[Principal('group', 'admin')],
         session=session
     )
     print(created)
+    read = await ProfileResource.read(
+        'admin_read',
+        {'job_id': created.job_id},
+        principals=[Principal('group', 'admin')],
+        session=session
+    )
+    print(read)
+
     await session.commit()
-    """
-    data = CreateSchema(function='test_func', defer_by=1)
-    create_data = await backend.create(session = session, data = data)
-    job_id = create_data.job_id
-    get_data = GetSchema(job_id = job_id)
-    #delete_data = await backend.delete(session=session, data = get_data)
-    #await session.commit()
-    n=1
-    read_data = await backend.read(session = session, data = get_data)
-    print(read_data)
-    await session.commit()
-    delete_data = await backend.delete(session=session, data = get_data)
-    while n<5:
-        read_data = await backend.read(session = sessionmaker(), data = get_data)
-        print(read_data)
+    read = await ProfileResource.read(
+        'admin_read',
+        {'job_id': created.job_id},
+        principals=[Principal('group', 'admin')],
+        session=session
+    )
+    print(read)
+
+    for i in range(10):
         time.sleep(0.5)
-        print()
-        n = n+1
-    try:
-        await session.commit()
-    except ArqSessionAbortFailure as e:
-        job_id = str(e).split(': ')[1]
-        session.remove_operations(job_id)
+        read = await ProfileResource.read(
+            'admin_read',
+            {'job_id': created.job_id},
+            principals=[Principal('group', 'admin')],
+            session=session
+        )
+        print(read)
+    
     await session.commit()
-    read_data = await backend.read(session = session, data = get_data)
+    try:
+        deleted = await ProfileResource.delete(
+            'admin_delete',
+            {'job_id': created.job_id},
+            principals=[Principal('group', 'admin')],
+            session=session
+        )
+        
+    except PoolJobCompleted:
 
-    print(read_data)
+        print('too late')
 
-    """
 class WorkerSettings:
     functions = [test_func]
     allow_abort_jobs = True

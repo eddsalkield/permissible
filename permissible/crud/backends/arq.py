@@ -44,15 +44,7 @@ class CreateSchema(BaseModel):
     defer_by: Optional[Union[int, float, timedelta]] = None
     expires: Optional[Union[int, float, timedelta]] = None
     job_try: Optional[int] = None
-    class Config:
-        fields = {
-            'job_id': '_job_id',
-            'queue_name': '_queue_name',
-            'defer_until': '_defer_until',
-            'defer_by': '_defer_by',
-            'expires': '_expires',
-            'job_try': '_job_try'
-        }
+
 
 class UpdateSchema(BaseModel):
     job_id: str
@@ -62,15 +54,19 @@ class UpdateSchema(BaseModel):
     defer_by: Optional[Union[int, float, timedelta]] = None
     expires: Optional[Union[int, float, timedelta]] = None
     job_try: Optional[int] = None
-    class Config:
-        fields = {
-            'job_id': '_job_id',
-            'queue_name': '_queue_name',
-            'defer_until': '_defer_until',
-            'defer_by': '_defer_by',
-            'expires': '_expires',
-            'job_try': '_job_try'
-        }
+
+class GetModel(BaseModel):
+    job_id: str
+    function: str
+    status: Optional[str] = None
+    job_try: Optional[int] = None
+    enqueue_time: datetime = None
+    score: Optional[int] = None
+    success: Optional[bool] = None
+    result: Optional[Any] = None
+    start_time: Optional[datetime] = None
+    finish_time: Optional[datetime] = None
+    queue_name: Optional[str] = None
 
 class GetSchema(BaseModel):
     job_id: str
@@ -97,7 +93,7 @@ async def abort_in_pool(pool, job_id) -> bool:
     results = await pool.all_job_results()
     results_found = {i.job_id: i for i in results}
     await pool.zadd('arq:abort', timestamp_ms(), job_id)
-
+    status = None
     if await pool.exists('arq:result:' + job_id):
         status = 'complete'
     elif await pool.exists('arq:in-progress:' + job_id):
@@ -158,9 +154,9 @@ class JobPromise:
 class JobPromiseModel(BaseModel):
     function: str
     job_id: str
+    status: str
 
 class JobDefModel(JobPromiseModel):
-    status: str
     job_try: Optional[int]
     enqueue_time: datetime
     score: Optional[int]
@@ -186,7 +182,7 @@ class ARQSession(BaseSession):
             self.operations[job_create.job_id].append(Add(create_model = job_create))
         else:
             self.operations[job_create.job_id] = [Add(create_model = job_create)]
-        return JobPromiseModel(function = job_create.function, job_id = job_create.job_id)
+        return JobPromiseModel(function = job_create.function, job_id = job_create.job_id, status='promise')
     
     async def delete(self, job_id):
         if job_id in self.operations:
@@ -217,17 +213,18 @@ class ARQSession(BaseSession):
             info = None
         
         if isinstance(info, JobPromise):
-            return JobPromiseModel(**asdict(info))
-        elif isinstance(info, JobDef):
-            info_dict = asdict(info)
-            info_dict['status'] = status
-            info_dict['job_id'] = job_id
-            return JobDefModel(**info_dict)
+            return JobPromiseModel(**asdict(info), status=status)
         elif isinstance(info, JobResult):
             info_dict = asdict(info)
             info_dict['status'] = status
             info_dict['job_id'] = job_id
             return JobResultModel(**info_dict)
+        elif isinstance(info, JobDef):
+            info_dict = asdict(info)
+            info_dict['status'] = status
+            info_dict['job_id'] = job_id
+            return JobDefModel(**info_dict)
+
         elif info is None:
             return None
 
@@ -235,7 +232,17 @@ class ARQSession(BaseSession):
         for job_id, operations in self.operations.items():
             for operation in operations:
                 if isinstance(operation, Add):
-                    await self.pool.enqueue_job(**operation.create_model.dict(by_alias=True))
+                    input_data = operation.create_model.dict()
+                    job_details = {
+                        'function': input_data['function'],
+                        '_job_id': input_data['job_id'],
+                        '_queue_name': input_data['queue_name'],
+                        '_defer_until': input_data['defer_until'],
+                        '_defer_by': input_data['defer_by'],
+                        '_expires': input_data['expires'],
+                        '_job_try': input_data['job_try'],
+                    }
+                    await self.pool.enqueue_job(**job_details)
                 elif isinstance(operation, Delete):
                     abort_completed = await abort_in_pool(self.pool, operation.job_id)
                     if not abort_completed:
@@ -266,11 +273,13 @@ class ARQBackend(CRUDBackend[ArqRedis]):
     ):
         self.session_maker = session_maker
         async def create(session: ARQSession, data: CreateSchema) -> JobPromiseModel:
-            job_data = data.dict(by_alias=True)
-            if job_data['_job_id'] is None:
-                job_data['_job_id'] = str(uuid.uuid4())
 
-            job_id = job_data['_job_id']
+            job_data = data.dict(by_alias=True)
+            print(job_data)
+            if job_data['job_id'] is None:
+                job_data['job_id'] = str(uuid.uuid4())
+
+            job_id = job_data['job_id']
             return_model = CreateSchema.parse_obj(job_data)
             result = await session.query(return_model.job_id)
             if result is not None:
@@ -290,32 +299,32 @@ class ARQBackend(CRUDBackend[ArqRedis]):
                 raise PoolJobNotFound()
             elif hasattr(result,'status') and result.status == 'complete':
                 raise PoolJobCompleted()
-            session.delete(data.job_id)
+            await session.delete(data.job_id)
             return result
         
         async def update(session: ARQSession, data: UpdateSchema):
             pass
         
-        #self.create = create
-        #self.read = read
-        #self.delete = delete
+        self.create = create
+        self.read = read
+        self.delete = delete
 
         super().__init__(
-            CRUDBackendAccessRecord[CreateSchema, CreateSchema, ARQSession](
+            CRUDBackendAccessRecord[CreateSchema, GetModel, ARQSession](
                 CreateSchema,
-                JobPromiseModel,
+                GetModel,
                 create,
                 CRUDAccessType.create
             ),
-            CRUDBackendAccessRecord[GetSchema, JobPromiseModel, ARQSession](
+            CRUDBackendAccessRecord[GetSchema, GetModel, ARQSession](
                 GetSchema,
-                JobPromiseModel,
+                GetModel,
                 read,
                 CRUDAccessType.read
             ),
-            CRUDBackendAccessRecord[GetSchema, JobPromiseModel, ARQSession](
+            CRUDBackendAccessRecord[GetSchema, GetModel, ARQSession](
                 GetSchema,
-                JobPromiseModel,
+                GetModel,
                 delete,
                 CRUDAccessType.delete
             ),
