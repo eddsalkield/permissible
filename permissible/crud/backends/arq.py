@@ -274,9 +274,7 @@ class ARQBackend(CRUDBackend[ArqRedis]):
     ):
         self.session_maker = session_maker
         async def create(session: ARQSession, data: CreateSchema) -> JobPromiseModel:
-
             job_data = data.dict(by_alias=True)
-            print(job_data)
             if job_data['job_id'] is None:
                 job_data['job_id'] = str(uuid.uuid4())
 
@@ -298,13 +296,10 @@ class ARQBackend(CRUDBackend[ArqRedis]):
             result = await session.query(data.job_id)
             if result is None:
                 raise PoolJobNotFound()
-            elif hasattr(result,'status') and result.status == 'complete':
+            elif hasattr(result,'status') and (result.status == 'complete' or result.status == 'in_progress'):
                 raise PoolJobCompleted()
             await session.delete(data.job_id)
             return result
-        
-        async def update(session: ARQSession, data: UpdateSchema):
-            pass
         
         self.create = create
         self.read = read
@@ -328,7 +323,7 @@ class ARQBackend(CRUDBackend[ArqRedis]):
                 GetModel,
                 delete,
                 CRUDAccessType.delete
-            ),
+            )
         )
 
 
