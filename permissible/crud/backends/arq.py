@@ -6,7 +6,7 @@ from typing import Any, Optional, Union, Dict, Callable, Generator, List
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from permissible.crud.core import CRUDBackend, CRUDAccessType, CRUDBackendAccessRecord
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 import uuid
 from time import time
 from dataclasses import dataclass, asdict
@@ -35,6 +35,7 @@ WorkerSettings defines functions available on startup
 
 
 """
+
 
 class CreateSchema(BaseModel):
     function: str
@@ -331,8 +332,8 @@ class ARQBackend(CRUDBackend[ArqRedis]):
         )
 
 
-    @contextmanager
-    def generate_session(self) -> Generator[ArqRedis, None, None]:
+    @asynccontextmanager
+    async def generate_session(self) -> Generator[ArqRedis, None, None]:
         """
         Generate a new session in case the user didn't specify one yet
         """
@@ -340,4 +341,4 @@ class ARQBackend(CRUDBackend[ArqRedis]):
         try:
             yield session
         finally:
-            session.close()
+            await session.close()

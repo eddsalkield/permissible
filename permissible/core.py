@@ -179,9 +179,10 @@ class Resource(Generic[AccessType]):
                 if has_permission(principals, r.permissions) == Action.ALLOW:
                     processed_data = pre_process(r.input_schema.parse_obj(data))
                     if session is None:
-                        with self._backend.generate_session() as session:
+                        async with self._backend.generate_session() as session:
                             output_data: BaseModel = await self._backend(r.type_, processed_data, session)
                             await run_handler(session.commit)
+
                     else:
                         output_data = await self._backend(r.type_, processed_data, session)
                     return r.output_schema.parse_obj(post_process(output_data))
@@ -192,7 +193,7 @@ class Resource(Generic[AccessType]):
                 processed_data = pre_process(
                         r.input_schema.parse_obj(data))
                 if session is None:
-                    with self._backend.generate_session() as session:
+                    async with self._backend.generate_session() as session:
                         output_data = await self._backend(r.type_, processed_data, session)
                         if has_permission(principals, r.permissions(
                                 output_data)) != Action.ALLOW:

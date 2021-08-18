@@ -1,6 +1,6 @@
 from typing import Any, Callable, Dict, Generator, Generic, List, Optional, \
                    Type, TypeVar
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from permissible.core import BaseSession
 from permissible.crud.core import CRUDBackend, CreateSchema, ReadSchema, \
@@ -73,8 +73,8 @@ class PrintCRUDBackend(CRUDBackend[PrintSession]):
                 CRUDAccessType.delete),
             )
 
-    @contextmanager
-    def generate_session(self) -> Generator[PrintSession, None, None]:
+    @asynccontextmanager
+    async def generate_session(self) -> Generator[PrintSession, None, None]:
         """
         Generate a new session in case the user didn't specify one yet
         """

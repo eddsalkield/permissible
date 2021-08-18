@@ -1,5 +1,5 @@
 from typing import Any, Dict, Generator, List, Union, ForwardRef
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from permissible.core import BaseSession
 from permissible.crud.core import CRUDBackend, CRUDAccessType, CRUDBackendAccessRecord
 from pydantic import BaseModel, create_model, BaseConfig, conlist
@@ -217,8 +217,8 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
             )
     
 
-    @contextmanager
-    def generate_session(self) -> Generator[Session, None, None]:
+    @asynccontextmanager
+    async def generate_session(self) -> Generator[Session, None, None]:
         """
         Generate a new session in case the user didn't specify one yet
         """
