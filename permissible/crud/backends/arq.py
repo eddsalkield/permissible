@@ -39,6 +39,7 @@ WorkerSettings defines functions available on startup
 
 class CreateSchema(BaseModel):
     function: str
+    function_args: Dict[str, Any] = {}
     job_id: Optional[str] = None
     queue_name: Optional[str] = None
     defer_until: Optional[datetime] = None
@@ -132,10 +133,10 @@ async def get_status_from_pool(pool, job_id, queue_name) -> str:
             return 'not_found'
         return 'deferred' if score > timestamp_ms() else 'queued'
 
-
 @dataclass
 class Add:
     create_model: CreateSchema
+
 @dataclass
 class Delete:
     job_id: str
@@ -242,6 +243,7 @@ class ARQSession(BaseSession):
                         '_defer_by': input_data['defer_by'],
                         '_expires': input_data['expires'],
                         '_job_try': input_data['job_try'],
+                        **input_data['function_args']
                     }
                     await self.pool.enqueue_job(**job_details)
                 elif isinstance(operation, Delete):
