@@ -262,10 +262,11 @@ class ARQSession(BaseSession):
 
 
 class ARQSessionMaker:
-    def __init__(self, pool):
-        self.pool = pool
-    def __call__(self):
-        return ARQSession(self.pool)
+    def __init__(self, pool_future):
+        self.pool_future = pool_future 
+    async def get_session(self):
+        await self.pool_future
+        return ARQSession(self.pool_future.result())
 
 
 class ARQBackend(CRUDBackend[ArqRedis]):
@@ -334,7 +335,7 @@ class ARQBackend(CRUDBackend[ArqRedis]):
         """
         Generate a new session in case the user didn't specify one yet
         """
-        session = self.session_maker()
+        session = await self.session_maker.get_session()
         try:
             yield session
         finally:

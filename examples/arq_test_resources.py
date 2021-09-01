@@ -16,11 +16,13 @@ async def test_func(ctx):
     return list_of_list
 
 async def main():
-    pool = await create_pool()
 
-    sessionmaker = ARQSessionMaker(pool=pool)
+    loop = asyncio.get_running_loop()
+    pool_fut = loop.create_future()
+    sessionmaker = ARQSessionMaker(pool_future=pool_fut)
     backend = ARQBackend(sessionmaker)
-    session = sessionmaker()
+    pool_fut.set_result(await create_pool())
+    session = await sessionmaker.get_session()
     ProfileResource = CRUDResource(
         # Admin interface to create profiles
         Create[CreateSchema, JobPromiseModel](

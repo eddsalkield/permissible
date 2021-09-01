@@ -1,22 +1,22 @@
 [[package]]
-category = "main"
-description = "asyncio (PEP 3156) Redis support"
 name = "aioredis"
+version = "1.3.1"
+description = "asyncio (PEP 3156) Redis support"
+category = "main"
 optional = false
 python-versions = "*"
-version = "1.3.1"
 
 [package.dependencies]
 async-timeout = "*"
 hiredis = "*"
 
 [[package]]
-category = "main"
-description = "Job queues in python with asyncio and redis"
 name = "arq"
+version = "0.21"
+description = "Job queues in python with asyncio and redis"
+category = "main"
 optional = true
 python-versions = ">=3.6"
-version = "0.21"
 
 [package.dependencies]
 aioredis = ">=1.1.0"
@@ -27,109 +27,107 @@ pydantic = ">=1"
 watch = ["watchgod (>=0.4)"]
 
 [[package]]
-category = "main"
-description = "Timeout context manager for asyncio programs"
 name = "async-timeout"
+version = "3.0.1"
+description = "Timeout context manager for asyncio programs"
+category = "main"
 optional = false
 python-versions = ">=3.5.3"
-version = "3.0.1"
 
 [[package]]
-category = "dev"
-description = "Atomic file writes."
-marker = "sys_platform == \"win32\""
 name = "atomicwrites"
+version = "1.4.0"
+description = "Atomic file writes."
+category = "dev"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
-version = "1.4.0"
 
 [[package]]
-category = "dev"
-description = "Classes Without Boilerplate"
 name = "attrs"
+version = "21.2.0"
+description = "Classes Without Boilerplate"
+category = "dev"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
-version = "21.2.0"
 
 [package.extras]
-dev = ["coverage (>=5.0.2)", "hypothesis", "pympler", "pytest (>=4.3.0)", "six", "mypy", "pytest-mypy-plugins", "zope.interface", "furo", "sphinx", "sphinx-notfound-page", "pre-commit"]
+dev = ["coverage[toml] (>=5.0.2)", "hypothesis", "pympler", "pytest (>=4.3.0)", "six", "mypy", "pytest-mypy-plugins", "zope.interface", "furo", "sphinx", "sphinx-notfound-page", "pre-commit"]
 docs = ["furo", "sphinx", "zope.interface", "sphinx-notfound-page"]
-tests = ["coverage (>=5.0.2)", "hypothesis", "pympler", "pytest (>=4.3.0)", "six", "mypy", "pytest-mypy-plugins", "zope.interface"]
-tests_no_zope = ["coverage (>=5.0.2)", "hypothesis", "pympler", "pytest (>=4.3.0)", "six", "mypy", "pytest-mypy-plugins"]
+tests = ["coverage[toml] (>=5.0.2)", "hypothesis", "pympler", "pytest (>=4.3.0)", "six", "mypy", "pytest-mypy-plugins", "zope.interface"]
+tests_no_zope = ["coverage[toml] (>=5.0.2)", "hypothesis", "pympler", "pytest (>=4.3.0)", "six", "mypy", "pytest-mypy-plugins"]
 
 [[package]]
-category = "main"
-description = "Composable command line interface toolkit"
 name = "click"
+version = "8.0.1"
+description = "Composable command line interface toolkit"
+category = "main"
 optional = true
 python-versions = ">=3.6"
-version = "8.0.1"
 
 [package.dependencies]
-colorama = "*"
+colorama = {version = "*", markers = "platform_system == \"Windows\""}
 
 [[package]]
-category = "main"
-description = "Cross-platform colored terminal text."
-marker = "platform_system == \"Windows\" or sys_platform == \"win32\""
 name = "colorama"
+version = "0.4.4"
+description = "Cross-platform colored terminal text."
+category = "main"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
-version = "0.4.4"
 
 [[package]]
-category = "main"
-description = "Python wrapper for hiredis"
 name = "hiredis"
+version = "2.0.0"
+description = "Python wrapper for hiredis"
+category = "main"
 optional = false
 python-versions = ">=3.6"
-version = "2.0.0"
 
 [[package]]
-category = "dev"
-description = "More routines for operating on iterables, beyond itertools"
 name = "more-itertools"
+version = "8.8.0"
+description = "More routines for operating on iterables, beyond itertools"
+category = "dev"
 optional = false
 python-versions = ">=3.5"
-version = "8.8.0"
 
 [[package]]
-category = "dev"
-description = "Core utilities for Python packages"
 name = "packaging"
+version = "21.0"
+description = "Core utilities for Python packages"
+category = "dev"
 optional = false
 python-versions = ">=3.6"
-version = "21.0"
 
 [package.dependencies]
 pyparsing = ">=2.0.2"
 
 [[package]]
-category = "dev"
-description = "plugin and hook calling mechanisms for python"
 name = "pluggy"
+version = "0.13.1"
+description = "plugin and hook calling mechanisms for python"
+category = "dev"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
-version = "0.13.1"
 
 [package.extras]
 dev = ["pre-commit", "tox"]
 
 [[package]]
-category = "dev"
-description = "library with cross-python path, ini-parsing, io, code, log facilities"
 name = "py"
+version = "1.10.0"
+description = "library with cross-python path, ini-parsing, io, code, log facilities"
+category = "dev"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
-version = "1.10.0"
 
 [[package]]
-category = "main"
-description = "Data validation and settings management using python 3.6 type hinting"
 name = "pydantic"
+version = "1.8.2"
+description = "Data validation and settings management using python 3.6 type hinting"
+category = "main"
 optional = false
 python-versions = ">=3.6.1"
-version = "1.8.2"
 
 [package.dependencies]
 typing-extensions = ">=3.7.4.3"
@@ -139,40 +137,40 @@ dotenv = ["python-dotenv (>=0.10.4)"]
 email = ["email-validator (>=1.0.3)"]
 
 [[package]]
-category = "main"
-description = "Tools to convert SQLAlchemy models to Pydantic models"
 name = "pydantic-sqlalchemy"
+version = "0.0.9"
+description = "Tools to convert SQLAlchemy models to Pydantic models"
+category = "main"
 optional = true
 python-versions = ">=3.6,<4.0"
-version = "0.0.9"
 
 [package.dependencies]
 pydantic = ">=1.5.1,<2.0.0"
 sqlalchemy = ">=1.3.16,<2.0.0"
 
 [package.extras]
-dev = ["jupyter (>=1.0.0,<2.0.0)", "autoflake (>=1.3.1,<2.0.0)", "flake8 (>=3.7.9,<4.0.0)"]
+dev = ["jupyter[dev] (>=1.0.0,<2.0.0)", "autoflake[dev] (>=1.3.1,<2.0.0)", "flake8[dev] (>=3.7.9,<4.0.0)"]
 
 [[package]]
-category = "dev"
-description = "Python parsing module"
 name = "pyparsing"
+version = "2.4.7"
+description = "Python parsing module"
+category = "dev"
 optional = false
 python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*"
-version = "2.4.7"
 
 [[package]]
-category = "dev"
-description = "pytest: simple powerful testing with Python"
 name = "pytest"
+version = "5.4.3"
+description = "pytest: simple powerful testing with Python"
+category = "dev"
 optional = false
 python-versions = ">=3.5"
-version = "5.4.3"
 
 [package.dependencies]
-atomicwrites = ">=1.0"
+atomicwrites = {version = ">=1.0", markers = "sys_platform == \"win32\""}
 attrs = ">=17.4.0"
-colorama = "*"
+colorama = {version = "*", markers = "sys_platform == \"win32\""}
 more-itertools = ">=4.0.0"
 packaging = "*"
 pluggy = ">=0.12,<1.0"
@@ -180,24 +178,24 @@ py = ">=1.5.0"
 wcwidth = "*"
 
 [package.extras]
-checkqa-mypy = ["mypy (v0.761)"]
+checkqa-mypy = ["mypy (==v0.761)"]
 testing = ["argcomplete", "hypothesis (>=3.56)", "mock", "nose", "requests", "xmlschema"]
 
 [[package]]
-category = "main"
-description = "Python 2 and 3 compatibility utilities"
 name = "six"
+version = "1.16.0"
+description = "Python 2 and 3 compatibility utilities"
+category = "main"
 optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
-version = "1.16.0"
 
 [[package]]
-category = "main"
-description = "Database Abstraction Library"
 name = "sqlalchemy"
+version = "1.3.16"
+description = "Database Abstraction Library"
+category = "main"
 optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
-version = "1.3.16"
 
 [package.extras]
 mssql = ["pyodbc"]
@@ -212,12 +210,12 @@ postgresql_psycopg2cffi = ["psycopg2cffi"]
 pymysql = ["pymysql"]
 
 [[package]]
-category = "main"
-description = "A library to filter SQLAlchemy queries."
 name = "sqlalchemy-filters"
+version = "0.12.0"
+description = "A library to filter SQLAlchemy queries."
+category = "main"
 optional = true
 python-versions = "*"
-version = "0.12.0"
 
 [package.dependencies]
 six = ">=1.10.0"
@@ -225,34 +223,34 @@ sqlalchemy = ">=1.0.16"
 
 [package.extras]
 dev = ["pytest (>=4.6.9)", "coverage (>=5.0.4,<5.1.0)", "sqlalchemy-utils (>=0.36.3,<0.37.0)", "flake8", "restructuredtext-lint", "pygments"]
-mysql = ["mysql-connector-python-rf (2.2.2)"]
-postgresql = ["psycopg2 (2.8.4)"]
+mysql = ["mysql-connector-python-rf (==2.2.2)"]
+postgresql = ["psycopg2 (==2.8.4)"]
 python2 = ["funcsigs (>=1.0.2)"]
 
 [[package]]
-category = "main"
-description = "Backported and Experimental Type Hints for Python 3.5+"
 name = "typing-extensions"
+version = "3.10.0.2"
+description = "Backported and Experimental Type Hints for Python 3.5+"
+category = "main"
 optional = false
 python-versions = "*"
-version = "3.10.0.0"
 
 [[package]]
-category = "dev"
-description = "Measures the displayed width of unicode strings in a terminal"
 name = "wcwidth"
+version = "0.2.5"
+description = "Measures the displayed width of unicode strings in a terminal"
+category = "dev"
 optional = false
 python-versions = "*"
-version = "0.2.5"
 
 [extras]
 arq = ["arq"]
 sqlalchemy = ["SQLAlchemy", "sqlalchemy-filters", "pydantic-sqlalchemy"]
 
 [metadata]
-content-hash = "a874970d4224621e36c68f8c89213c33cec301200d9c38f5007602adfdd005da"
-lock-version = "1.0"
+lock-version = "1.1"
 python-versions = "^3.9"
+content-hash = "a874970d4224621e36c68f8c89213c33cec301200d9c38f5007602adfdd005da"
 
 [metadata.files]
 aioredis = [
@@ -408,9 +406,9 @@ sqlalchemy-filters = [
     {file = "sqlalchemy_filters-0.12.0-py3-none-any.whl", hash = "sha256:92fad103611c02c8667f5d892afd3fa8d450eeeb79d70cfff9c9fe77d91ec805"},
 ]
 typing-extensions = [
-    {file = "typing_extensions-3.10.0.0-py2-none-any.whl", hash = "sha256:0ac0f89795dd19de6b97debb0c6af1c70987fd80a2d62d1958f7e56fcc31b497"},
-    {file = "typing_extensions-3.10.0.0-py3-none-any.whl", hash = "sha256:779383f6086d90c99ae41cf0ff39aac8a7937a9283ce0a414e5dd782f4c94a84"},
-    {file = "typing_extensions-3.10.0.0.tar.gz", hash = "sha256:50b6f157849174217d0656f99dc82fe932884fb250826c18350e159ec6cdf342"},
+    {file = "typing_extensions-3.10.0.2-py2-none-any.whl", hash = "sha256:d8226d10bc02a29bcc81df19a26e56a9647f8b0a6d4a83924139f4a8b01f17b7"},
+    {file = "typing_extensions-3.10.0.2-py3-none-any.whl", hash = "sha256:f1d25edafde516b146ecd0613dabcc61409817af4766fbbcfb8d1ad4ec441a34"},
+    {file = "typing_extensions-3.10.0.2.tar.gz", hash = "sha256:49f75d16ff11f1cd258e1b988ccff82a3ca5570217d7ad8c5f48205dd99a677e"},
 ]
 wcwidth = [
     {file = "wcwidth-0.2.5-py2.py3-none-any.whl", hash = "sha256:beb4802a9cebb9144e99086eff703a642a13d6a0052920003a230f3294bbe784"},
