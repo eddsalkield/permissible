@@ -75,17 +75,17 @@ class CRUDResource(Resource[CRUDAccessType]):
     given access.
 
     """
-    def create(self, *args, **kwargs) -> OutputSchema:
-        return super().__call__(CRUDAccessType.create, *args, **kwargs)
+    async def create(self, *args, **kwargs) -> OutputSchema:
+        return await super().__call__(CRUDAccessType.create, *args, **kwargs)
 
-    def read(self, *args, **kwargs) -> OutputSchema:
-        return super().__call__(CRUDAccessType.read, *args, **kwargs)
+    async def read(self, *args, **kwargs) -> OutputSchema:
+        return await super().__call__(CRUDAccessType.read, *args, **kwargs)
 
-    def update(self, *args, **kwargs) -> OutputSchema:
-        return super().__call__(CRUDAccessType.update, *args, **kwargs)
+    async def update(self, *args, **kwargs) -> OutputSchema:
+        return await super().__call__(CRUDAccessType.update, *args, **kwargs)
 
-    def delete(self, *args, **kwargs) -> OutputSchema:
-        return super().__call__(CRUDAccessType.delete, *args, **kwargs)
+    async def delete(self, *args, **kwargs) -> OutputSchema:
+        return await super().__call__(CRUDAccessType.delete, *args, **kwargs)
 
 # Type variables CRUD schema
 

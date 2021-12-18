@@ -1,16 +1,89 @@
-from typing import Any, Callable, Dict, Generator, Generic, List, Optional, \
-                   Type, TypeVar
-from contextlib import contextmanager
-
+from typing import Any, Dict, Generator, List, Union, ForwardRef
+from contextlib import asynccontextmanager
 from permissible.core import BaseSession
-from permissible.crud.core import CRUDBackend, CreateSchema, ReadSchema, \
-        UpdateSchema, DeleteSchema, CRUDAccessType, CRUDBackendAccessRecord
-from pydantic import BaseModel, create_model, BaseConfig
+from permissible.crud.core import CRUDBackend, CRUDAccessType, CRUDBackendAccessRecord
+from pydantic import BaseModel, create_model, BaseConfig, conlist
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 from sqlalchemy import inspect
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session
 from sqlalchemy_filters import apply_filters
+from enum import Enum
+
+
+class BinOp(Enum):
+    equal = '=='
+    equal_alt = 'eq'
+    not_equal = '!='
+    not_equal_alt = 'ne'
+    greater_than = '>'
+    greater_than_alt = 'gt'
+    less_than = '<'
+    less_than_alt = 'lt'
+    greater_than_or_eq = '>='
+    greater_than_or_eq_alt = 'ge'
+    less_than_or_eq = '<='
+    less_than_or_eq_alt = 'le'
+    like = 'like'
+    ilike = 'ilike'
+    not_ilike = 'not_ilike'
+    in_ = 'in'
+    not_in = 'not_in'
+    any_ = 'any'
+    not_any = 'not_any'
+
+
+class MonOp(Enum):
+    is_null = 'is_null'
+    is_not_null = 'is_not_null'
+
+
+class BinFilter(BaseModel):
+    field: str
+    # TODO Make enum of available fields
+    op: BinOp
+    value: Any
+    class Config:
+        use_enum_values = True
+
+class MonFilter(BaseModel):
+    field: str
+    # TODO Make enum of available fields
+    op: MonOp
+    class Config:
+        use_enum_values = True
+
+AndFilter = ForwardRef('AndFilter')
+OrFilter = ForwardRef('OrFilter')
+NotFilter = ForwardRef('NotFilter')
+
+Filter = Union[BinFilter, MonFilter, AndFilter, OrFilter, NotFilter]
+
+class AndFilter(BaseModel):
+    class Config:
+        fields = {'and_': 'and'}
+    and_: conlist(Filter, min_items=1)
+
+
+class OrFilter(BaseModel):
+    class Config:
+        fields = {'or_': 'or'}
+    or_: conlist(Filter, min_items=1)
+
+
+class NotFilter(BaseModel):
+    class Config:
+        fields = {'not_': 'not'}
+    not_: conlist(Filter, min_items=1, max_items=1)
+
+AndFilter.update_forward_refs()
+OrFilter.update_forward_refs()
+NotFilter.update_forward_refs()
+    
+
+class QuerySchema(BaseModel):
+    filter_spec: List[Filter]
+    #sort_spec
+    #pagination_spec
 
 
 # TODO: get from webplatform helpers
@@ -36,11 +109,20 @@ def get_primary_keys_from_table(Table) -> Dict[str, Any]:
     return primary_keys
 
 
+
+
 # Custom exceptions
 class AlreadyExistsError(ValueError):
     def __init__(self, *args, **kwargs):
         super().__init__('Table record already exists', *args, **kwargs)
 
+class MultipleRecordsError(ValueError):
+    def __init__(self, *args, **kwargs):
+        super().__init__('Table record non unique', *args, **kwargs)
+
+class NotFoundError(ValueError):
+    def __init__(self, *args, **kwargs):
+        super().__init__('Table record not found', *args, **kwargs)
 
 class ORMConfig(BaseConfig):
     orm_mode = True
@@ -65,64 +147,78 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
 
         self.SessionLocal = SessionLocal
         self.Model = Model
-        # Sets orm_mode=True by default
         self.Schema = sqlalchemy_to_pydantic(Model)
         self.primary_keys: Dict[str, Any] = get_primary_keys_from_table(Model)
-
         self.DeleteSchema = create_model(
             f'{Model.__name__}.Delete', __config__=ORMConfig,
             **{n: (t, ...) for n, t in self.primary_keys.items()})  # type: ignore
+        class OutputQuerySchema(BaseModel):
+            results: List[self.Schema]
+        self.OutputQuerySchema = OutputQuerySchema
 
-        def create(session: Session, data: BaseModel) -> BaseModel:
-            # TODO: do we need to cast data to self.Schema here?
-            # Test if record with matching primary keys already exists
-            if len(self._get_by_primary_keys(session, data)) != 1:
+        def create(session: Session, data: self.Schema) -> BaseModel:
+            results = self._get_by_primary_keys(session, data.dict())
+            if len(results) == 1:
                 raise AlreadyExistsError()
-            # Create record in session
-            model = self.Model(data.dict())
+            elif len(results) > 1:
+                raise MultipleRecordsError()
+            model = self.Model(**data.dict())
             session.add(model)
-            return data
+            return self.Schema.from_orm(model)
 
         def read(session: Session, data: QuerySchema) -> List[BaseModel]:
-            print(f'Reading {data}')
-            return data
+            query_obj = session.query(Model)
+            filtered_query_obj = apply_filters(query_obj, data.dict()['filter_spec']).all()
+            return OutputQuerySchema(results = [self.Schema.from_orm(i) for i in filtered_query_obj])
 
-        def update(session: Session, data: BaseModel) -> BaseModel:
-            model = self._get_by_primary_keys(session, data)
+        def update(session: Session, data: self.Schema) -> BaseModel:
+            results = self._get_by_primary_keys(session, data.dict())
+            if len(results) == 0:
+                raise NotFoundError()
+            elif len(results) > 1:
+                raise MultipleRecordsError()
+            model = results[0]
             for item, value in data.dict().items():
                 setattr(model, item, value)
-            return self.Schema(model)
+            return self.Schema.from_orm(model)
 
-        def delete(session: Session, data: BaseModel) -> None:
-            delete_args = self.DeleteSchema(**data.dict())
-            model = self._get_by_primary_keys(session, delete_args)
+        def delete(session: Session, data: self.DeleteSchema) -> None:
+            delete_args = self.DeleteSchema(**data.dict()).dict()
+            results = self._get_by_primary_keys(session, delete_args)
+            if len(results) == 0:
+                raise NotFoundError()
+            elif len(results) > 1:
+                raise MultipleRecordsError()
+            model = results[0]
             session.delete(model)
-
+            return self.Schema.from_orm(model)
+                
         super().__init__(
-            CRUDBackendAccessRecord[CreateSchema, CreateSchema, Session](
-                create_schema,
-                create_schema,
+            CRUDBackendAccessRecord[self.Schema, self.Schema, Session](
+                self.Schema,
+                self.Schema,
                 create,
                 CRUDAccessType.create),
-            CRUDBackendAccessRecord[ReadSchema, ReadSchema, Session](
-                read_schema,
-                read_schema,
+            CRUDBackendAccessRecord[QuerySchema, OutputQuerySchema, Session](
+                QuerySchema,
+                OutputQuerySchema,
                 read,
                 CRUDAccessType.read),
-            CRUDBackendAccessRecord[UpdateSchema, UpdateSchema, Session](
-                update_schema,
-                update_schema,
+            CRUDBackendAccessRecord[self.Schema, List[self.Schema], Session](
+                self.Schema,
+                self.Schema,
                 update,
                 CRUDAccessType.update),
-            CRUDBackendAccessRecord[DeleteSchema, DeleteSchema, Session](
-                delete_schema,
-                delete_schema,
+            CRUDBackendAccessRecord[self.DeleteSchema, self.DeleteSchema, Session](
+                self.DeleteSchema,
+                self.Schema,
                 delete,
                 CRUDAccessType.delete),
             )
+    
 
-    @contextmanager
-    def generate_session(self) -> Generator[BaseSession, None, None]:
+    @asynccontextmanager
+    async def generate_session(self) -> Generator[Session, None, None]:
         """
         Generate a new session in case the user didn't specify one yet
         """

@@ -7,7 +7,15 @@ from typing import Any, Callable, Dict, Generator, Generic, List, Optional, \
 
 from permissible.permissions import UnauthorisedError, Action, \
         BaseAccessType, Principal, Permission, has_permission
+import asyncio
 
+
+# From fastapi users
+async def run_handler(handler: Callable, *args, **kwargs):
+    if asyncio.iscoroutinefunction(handler):
+        return await handler(*args, **kwargs)
+    else:
+        return handler(*args, **kwargs)
 
 AccessType = TypeVar('AccessType', bound=BaseAccessType)
 InputSchema = TypeVar('InputSchema', bound=BaseModel)
@@ -51,9 +59,10 @@ class Backend(Generic[AccessType, Session]):
         The details of the access are defined in r.
         The resulting access can be subsequently invoked through __call__.
         """
-        def access(data: Any, session: Session) -> OutputSchema:
-            return r.output_schema.parse_obj(r.process(
-                session, r.input_schema.parse_obj(data)))
+        async def access(data: Any, session: Session) -> OutputSchema:
+            processed_data = await run_handler(r.process, session, r.input_schema.parse_obj(data))
+            #processed_data = r.process(session, r.input_schema.parse_obj(data))
+            return r.output_schema.parse_obj(processed_data)
         return access
 
     def __init__(
@@ -68,14 +77,14 @@ class Backend(Generic[AccessType, Session]):
             self._access_records[r.type_] = r
             self._access_methods[r.type_] = self._register_access(r)
 
-    def __call__(self, type_: AccessType, data: Any,
+    async def __call__(self, type_: AccessType, data: Any,
                  session: Session) -> OutputSchema:
         """
         Invoke an access on data of the given type within the context of the
         session.
         """
-
-        return self._access_methods[type_](data, session)
+        return await self._access_methods[type_](data, session)
+        #return self._access_methods[type_](data, session)
 
     @contextmanager
     def generate_session(self) -> Generator[Session, None, None]:
@@ -88,8 +97,10 @@ class Backend(Generic[AccessType, Session]):
 # Resource definition
 
 AccessName = str
-BaseSession = Any
 
+class BaseSession:
+    def commit(self):
+        raise NotImplementedError('Subclass implements this')
 
 @dataclass(frozen=True)
 class AccessRecord(
@@ -158,7 +169,7 @@ class Resource(Generic[AccessType]):
             else:
                 return r.post_process(data)
 
-        def access(
+        async def access(
                 data: Any,
                 principals: List[Principal],
                 session: Optional[BaseSession] = None) -> OutputSchema:
@@ -166,15 +177,14 @@ class Resource(Generic[AccessType]):
             if isinstance(r.permissions, list):
                 # Evaluate static permissions
                 if has_permission(principals, r.permissions) == Action.ALLOW:
-                    processed_data = pre_process(
-                            r.input_schema.parse_obj(data))
+                    processed_data = pre_process(r.input_schema.parse_obj(data))
                     if session is None:
-                        with self._backend.generate_session() as session:
-                            output_data: BaseModel = \
-                                self._backend(r.type_, processed_data, session)
+                        async with self._backend.generate_session() as session:
+                            output_data: BaseModel = await self._backend(r.type_, processed_data, session)
+                            await run_handler(session.commit)
+
                     else:
-                        output_data = \
-                            self._backend(r.type_, processed_data, session)
+                        output_data = await self._backend(r.type_, processed_data, session)
                     return r.output_schema.parse_obj(post_process(output_data))
                 else:
                     raise UnauthorisedError
@@ -183,12 +193,12 @@ class Resource(Generic[AccessType]):
                 processed_data = pre_process(
                         r.input_schema.parse_obj(data))
                 if session is None:
-                    with self._backend.generate_session() as session:
-                        output_data = \
-                            self._backend(r.type_, processed_data, session)
+                    async with self._backend.generate_session() as session:
+                        output_data = await self._backend(r.type_, processed_data, session)
                         if has_permission(principals, r.permissions(
                                 output_data)) != Action.ALLOW:
                             raise UnauthorisedError
+                        session.commit()
                 else:
                     output_data = \
                         self._backend(r.type_, processed_data, session)
@@ -212,11 +222,11 @@ class Resource(Generic[AccessType]):
             self._access_methods[r.type_][r.name] = method
         self._backend = backend
 
-    def __call__(self, type_: AccessType, name: AccessName, data: Any,
+    async def __call__(self, type_: AccessType, name: AccessName, data: Any,
                  principals: List[Principal],
                  session: Optional[BaseSession] = None) -> OutputSchema:
         """
         Invoke an access on data of the given type and name, on a user with
         the given principals within the context of the session.
         """
-        return self._access_methods[type_][name](data, principals, session)
+        return await run_handler(self._access_methods[type_][name], data, principals, session)
