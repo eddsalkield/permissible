@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 from typing import TypeVar
 
-from permissible.core import Backend, Session, InputSchema, OutputSchema, \
+from permissible.core import Backend, InputSchema, OutputSchema, \
         BackendAccessRecord, AccessRecord, Resource
 from permissible.permissions import BaseAccessType
 
@@ -17,7 +17,7 @@ class CRUDAccessType(BaseAccessType):
     delete = 'delete'
 
 
-class CRUDBackend(Backend[CRUDAccessType, Session]):
+class CRUDBackend(Backend[CRUDAccessType]):
     """
     Base class of all backends that define CRUD operations.
     """
@@ -25,8 +25,7 @@ class CRUDBackend(Backend[CRUDAccessType, Session]):
 
 
 class CRUDBackendAccessRecord(
-        BackendAccessRecord[CRUDAccessType, InputSchema,
-                            OutputSchema, Session]):
+        BackendAccessRecord[CRUDAccessType, InputSchema, OutputSchema]):
     """
     An input argument to a CRUDBackend, defining a new type of access.
     """

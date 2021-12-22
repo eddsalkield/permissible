@@ -1,0 +1,3 @@
+Come up with a good way of sharing lock timouts among transactions
+
+Build signalling backends e.g. for notifications, emails, etc.

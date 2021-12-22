@@ -269,7 +269,7 @@ class ARQSessionMaker:
         return ARQSession(self.pool_future.result())
 
 
-class ARQBackend(CRUDBackend[ArqRedis]):
+class ARQBackend(CRUDBackend):
     session_maker: ARQSessionMaker
     def __init__(
         self,

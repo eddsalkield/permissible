@@ -19,15 +19,13 @@ import asyncio
 # perform limited modifications.
 
 
-DATABASE_URL = "sqlite:///./test.db"
-
-declarative_base_instance: DeclarativeMeta = declarative_base()
 engine = create_engine(
-    DATABASE_URL,
+    "sqlite:///./test.db",
     connect_args={'check_same_thread': False}
 )
 Session = sessionmaker(bind=engine)
 
+declarative_base_instance: DeclarativeMeta = declarative_base()
 class BackModel(declarative_base_instance):
     __tablename__ = 'Test_table'
     full_name = Column(Text(), primary_key = True)
@@ -91,7 +89,7 @@ async def main():
                 'admin_create',
                 {'full_name': 'Johnny English', 'age': 58},
                 principals=[Principal('group', 'admin')],
-                session=None)
+                transaction=None)
     except AlreadyExistsError:
         pass
 
@@ -101,7 +99,7 @@ async def main():
                 'restricted_create',
                 {'full_name': 'Mr. Bean'},
                 principals=[Principal('group', 'user')],
-                session=None)
+                transaction=None)
     except AlreadyExistsError:
         pass
 

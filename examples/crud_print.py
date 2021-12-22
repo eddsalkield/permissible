@@ -61,11 +61,11 @@ async def main():
             'admin_create',
             {'full_name': 'Johnny English', 'age': 58},
             principals=[Principal('group', 'admin')],
-            session=None)
+            transaction=None)
     """
-    Session opened
-    Creating full_name='Johnny English' age=58
-    Session closed
+    session opened
+    creating full_name='Johnny English' age=58
+    session closed
     """
 
     # Invoke restricted_create to create a new profile as an unprivileged user
@@ -73,7 +73,7 @@ async def main():
             'restricted_create',
             {'full_name': 'Mr. Bean'},
             principals=[Principal('group', 'user')],
-            session=None)
+            transaction=None)
     """
     Session opened
     Creating full_name='Mr. Bean' age=23

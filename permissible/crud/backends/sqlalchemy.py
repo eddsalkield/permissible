@@ -1,11 +1,10 @@
 from typing import Any, Dict, Generator, List, Union, ForwardRef
-from contextlib import asynccontextmanager
 from permissible.core import BaseSession
 from permissible.crud.core import CRUDBackend, CRUDAccessType, CRUDBackendAccessRecord
 from pydantic import BaseModel, create_model, BaseConfig, conlist
 from pydantic_sqlalchemy import sqlalchemy_to_pydantic
 from sqlalchemy import inspect
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy_filters import apply_filters
 from enum import Enum
 
@@ -109,8 +108,6 @@ def get_primary_keys_from_table(Table) -> Dict[str, Any]:
     return primary_keys
 
 
-
-
 # Custom exceptions
 class AlreadyExistsError(ValueError):
     def __init__(self, *args, **kwargs):
@@ -128,11 +125,10 @@ class ORMConfig(BaseConfig):
     orm_mode = True
 
 
-class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
+class SQLAlchemyCRUDBackend(CRUDBackend):
     """
     A CRUD backend for SQLAlchemy operations on the contents of a given table.
     """
-    SessionLocal: Session    # TODO: type
     Model: Any               # TODO: typing according to declarative_base
 
     def _get_by_primary_keys(self, session, data):
@@ -142,11 +138,11 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
 
     def __init__(
             self,
-            Model: Any,  # TODO: type
-            SessionLocal: Session):
+            Model: Any,     # TODO: type
+            session_maker: Any):   # TODO: type
 
-        self.SessionLocal = SessionLocal
         self.Model = Model
+        self.session_maker = session_maker
         self.Schema = sqlalchemy_to_pydantic(Model)
         self.primary_keys: Dict[str, Any] = get_primary_keys_from_table(Model)
         self.DeleteSchema = create_model(
@@ -194,22 +190,22 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
             return self.Schema.from_orm(model)
                 
         super().__init__(
-            CRUDBackendAccessRecord[self.Schema, self.Schema, Session](
+            CRUDBackendAccessRecord[self.Schema, self.Schema](
                 self.Schema,
                 self.Schema,
                 create,
                 CRUDAccessType.create),
-            CRUDBackendAccessRecord[QuerySchema, OutputQuerySchema, Session](
+            CRUDBackendAccessRecord[QuerySchema, OutputQuerySchema](
                 QuerySchema,
                 OutputQuerySchema,
                 read,
                 CRUDAccessType.read),
-            CRUDBackendAccessRecord[self.Schema, List[self.Schema], Session](
+            CRUDBackendAccessRecord[self.Schema, List[self.Schema]](
                 self.Schema,
                 self.Schema,
                 update,
                 CRUDAccessType.update),
-            CRUDBackendAccessRecord[self.DeleteSchema, self.DeleteSchema, Session](
+            CRUDBackendAccessRecord[self.DeleteSchema, self.DeleteSchema](
                 self.DeleteSchema,
                 self.Schema,
                 delete,
@@ -217,13 +213,10 @@ class SQLAlchemyCRUDBackend(CRUDBackend[Session]):
             )
     
 
-    @asynccontextmanager
-    async def generate_session(self) -> Generator[Session, None, None]:
+    def _generate_session(self) -> Session:
         """
         Generate a new session in case the user didn't specify one yet
         """
-        session = self.SessionLocal()
-        try:
-            yield session
-        finally:
-            session.close()
+        # TODO: we must make sure that commits can't fail
+        # This will require overwriting them to perform two-phase for non-sqlite backends
+        return self.session_maker()

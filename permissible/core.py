@@ -17,17 +17,72 @@ async def run_handler(handler: Callable, *args, **kwargs):
     else:
         return handler(*args, **kwargs)
 
+class BaseSession:
+    """
+    Write the session out persistently.  This action is not permitted to fail.
+    Any integrity checks and lock obtaining must happen before the commit.
+    The behaviour of running both commit and rollback is undefined.
+    """
+    def commit(self):
+        raise NotImplementedError('Subclass implements this')
+
+    def rollback(self):
+        raise NotImplementedError('Subclass implements this')
+
+    def close(self):
+        raise NotImplementedError('Subclass implements this')
+
 AccessType = TypeVar('AccessType', bound=BaseAccessType)
 InputSchema = TypeVar('InputSchema', bound=BaseModel)
 OutputSchema = TypeVar('OutputSchema', bound=BaseModel)
-Session = TypeVar('Session')
+Session = TypeVar('Session', bound=BaseSession)
 
+class Transaction():
+    """
+    Represents a collection of sessions, providing the guarantee that on commit,
+    either all of the sessions commit, or none of them do.
+    The behaviour of running both commit and rollback is undefined.
+    """
+    sessions: Dict[str, BaseSession] = {} # TODO: there's a problem with this rather than initialising in __init__
+                    # What was it?...
+
+    def __setitem__(self, key: str, session: Session) -> Session:
+        self.sessions[key] = session
+        return session
+
+    def __getitem__(self, key: str) -> Session:
+        return self.sessions[key]
+
+    def commit(self):
+        # TODO: could this be an async for, considering it's over IO?
+        for session in self.sessions.values():
+            # TODO: we may need run_handler here if the session's method can be optionally async
+            session.commit()
+    
+    def rollback(self, error: Exception):
+        for session in self.sessions.values():
+            session.rollback()
+        raise error
+    
+    def close(self):
+        for session in self.sessions.values():
+            session.close()
+
+@contextmanager
+def transaction_manager():
+    try:
+        t = Transaction()
+        yield t
+    except Exception as e:
+        t.rollback(e)
+    finally:
+        t.commit()
 
 # Backend definition
 
 @dataclass(frozen=True)
 class BackendAccessRecord(
-        Generic[AccessType, InputSchema, OutputSchema, Session]):
+        Generic[AccessType, InputSchema, OutputSchema]):
     """
     An input argument to a Backend, defining a new type of access.
     """
@@ -37,7 +92,7 @@ class BackendAccessRecord(
     type_: AccessType
 
 
-class Backend(Generic[AccessType, Session]):
+class Backend(Generic[AccessType]):
     """
     Base class of all backends.
 
@@ -48,48 +103,55 @@ class Backend(Generic[AccessType, Session]):
     _access_records: Dict[AccessType, BackendAccessRecord] = {}
     _access_methods: \
         Dict[AccessType,
-             Callable[[Any, Session], OutputSchema]] = {}
+             Callable[[Any, BaseSession], OutputSchema]] = {}
 
     def _register_access(
             self,
-            r: BackendAccessRecord[AccessType, InputSchema, OutputSchema,
-                                   Session]):
+            r: BackendAccessRecord[AccessType, InputSchema, OutputSchema]):
         """
         Internal method to register a new access with the backend.
         The details of the access are defined in r.
         The resulting access can be subsequently invoked through __call__.
         """
-        async def access(data: Any, session: Session) -> OutputSchema:
+        async def access(data: Any, session: BaseSession) -> OutputSchema:
             processed_data = await run_handler(r.process, session, r.input_schema.parse_obj(data))
-            #processed_data = r.process(session, r.input_schema.parse_obj(data))
-            return r.output_schema.parse_obj(processed_data)
+            if r.output_schema is None:
+                return None
+            else:
+                return r.output_schema.parse_obj(processed_data)
         return access
 
     def __init__(
             self,
-            *recs: BackendAccessRecord[AccessType, InputSchema, OutputSchema,
-                                       Session]):
+            *recs: BackendAccessRecord[AccessType, InputSchema, OutputSchema]):
         """
         Initialises a new Backend with methods as specified within the
         recs, in accordance with AccessType
         """
+        print("adding access records")
         for r in recs:
+            print(f"{r.type_}")
             self._access_records[r.type_] = r
             self._access_methods[r.type_] = self._register_access(r)
 
     async def __call__(self, type_: AccessType, data: Any,
-                 session: Session) -> OutputSchema:
+                 transaction: Transaction) -> OutputSchema:
         """
         Invoke an access on data of the given type within the context of the
         session.
         """
+        try:
+            session = transaction[self.__class__.__name__]
+        except KeyError:
+            session = transaction[self.__class__.__name__] = self._generate_session()
         return await self._access_methods[type_](data, session)
-        #return self._access_methods[type_](data, session)
 
     @contextmanager
-    def generate_session(self) -> Generator[Session, None, None]:
+    def _generate_session(self) -> BaseSession:
         """
         Used to generate a new session in case the user didn't specify one yet.
+        It's a context manager to enable the session to be cleaned up in a
+        finally block.
         """
         raise NotImplementedError('Subclass implements this')
 
@@ -97,10 +159,6 @@ class Backend(Generic[AccessType, Session]):
 # Resource definition
 
 AccessName = str
-
-class BaseSession:
-    def commit(self):
-        raise NotImplementedError('Subclass implements this')
 
 @dataclass(frozen=True)
 class AccessRecord(
@@ -172,40 +230,43 @@ class Resource(Generic[AccessType]):
         async def access(
                 data: Any,
                 principals: List[Principal],
-                session: Optional[BaseSession] = None) -> OutputSchema:
+                transaction: Optional[Transaction] = None) -> OutputSchema:
             # Check permissions
             if isinstance(r.permissions, list):
                 # Evaluate static permissions
                 if has_permission(principals, r.permissions) == Action.ALLOW:
                     processed_data = pre_process(r.input_schema.parse_obj(data))
-                    if session is None:
-                        async with self._backend.generate_session() as session:
-                            output_data: BaseModel = await self._backend(r.type_, processed_data, session)
-                            await run_handler(session.commit)
+                    if transaction is None:
+                        with transaction_manager() as transaction:
+                            output_data = await self._backend(r.type_, processed_data, transaction)
 
                     else:
-                        output_data = await self._backend(r.type_, processed_data, session)
-                    return r.output_schema.parse_obj(post_process(output_data))
+                        output_data = await self._backend(r.type_, processed_data, transaction)
+                    if r.output_schema is None:
+                        return None
+                    else:
+                        return r.output_schema.parse_obj(post_process(output_data))
                 else:
                     raise UnauthorisedError
             else:
                 # Evaluate dynamic permissions
                 processed_data = pre_process(
                         r.input_schema.parse_obj(data))
-                if session is None:
-                    async with self._backend.generate_session() as session:
-                        output_data = await self._backend(r.type_, processed_data, session)
+                if transaction is None:
+                    with transaction_manager() as transaction:
+                        output_data = await self._backend(r.type_, processed_data, transaction)
                         if has_permission(principals, r.permissions(
                                 output_data)) != Action.ALLOW:
                             raise UnauthorisedError
-                        session.commit()
                 else:
-                    output_data = \
-                        self._backend(r.type_, processed_data, session)
+                    output_data = self._backend(r.type_, processed_data, transaction)
                     if has_permission(principals, r.permissions(
                             output_data)) != Action.ALLOW:
                         raise UnauthorisedError
-                return r.output_schema.parse_obj(post_process(output_data))
+                if r.output_schema is None:
+                    return None
+                else:
+                    return r.output_schema.parse_obj(post_process(output_data))
 
         return access
 
@@ -224,9 +285,9 @@ class Resource(Generic[AccessType]):
 
     async def __call__(self, type_: AccessType, name: AccessName, data: Any,
                  principals: List[Principal],
-                 session: Optional[BaseSession] = None) -> OutputSchema:
+                 transaction: Optional[Transaction] = None) -> OutputSchema:
         """
         Invoke an access on data of the given type and name, on a user with
-        the given principals within the context of the session.
+        the given principals within the context of the transaction.
         """
-        return await run_handler(self._access_methods[type_][name], data, principals, session)
+        return await run_handler(self._access_methods[type_][name], data, principals, transaction)
