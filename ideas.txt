@@ -1,3 +1,21 @@
 Come up with a good way of sharing lock timouts among transactions
 
-Build signalling backends e.g. for notifications, emails, etc.
+Backends to build:
+	* signalling backends e.g. for notifications, emails, etc.
+	* additional file backends e.g. S3, 9p, webdav, etc.
+
+Resources to build:
+	* router backend - looks at the schema type and routes accordingly
+	      Used to distinguishing video, image, sound, etc.
+		A generic one may well auto-implement for all of the possible
+		actions, such as CRUD.
+	* tee backend - sends the same stuff to multiple resources
+	      Used to implement images + thumbnails being stored
+	* splitter backend - looks at a key in a dict, and routes (to multiple) accordingly
+	      Used to implement combined requests (e.g. update image file and database)
+	* image backend - verifies that the file being sent to the backend is actually an image
+	      Video, audio, etc. respective ones
+	      Maybe this could instead be a generic file type checker?
+		  Probably not, because we want to inspect the files, not just their extensions
+	* image compressor backend
+	      Used to actually make the thumbnails

@@ -12,8 +12,7 @@ from permissible.crud.core import CRUDBackend, CreateSchema, ReadSchema, \
 from io import BufferedReader
 from uuid import UUID, uuid4
 from dataclasses import dataclass
-from fasteners import InterProcessReaderWriterLock
-
+from fasteners import InterProcessLock
 
 
 class FileCreateSchema(BaseModel):
@@ -51,7 +50,7 @@ class FileReturnSchema(BaseModel):
 
 class FileSession(BaseSession):
     path: Path
-    state: Dict[UUID, Tuple[List[Union[FileCreateSchema, FileUpdateSchema, FileDeleteSchema]], InterProcessReaderWriterLock]]
+    state: Dict[UUID, Tuple[Union[FileCreateSchema, FileUpdateSchema, FileDeleteSchema, None], InterProcessLock]]
 
     # TODO: can this be cleaned up?
     def __init__(self, path: Path):
@@ -62,58 +61,83 @@ class FileSession(BaseSession):
     # Currently add and query are not async, so they can never be scheduled concurrently
     # within a thread.  Therefore, we only utilise an inter-process lock
     def add(self, data: Union[FileCreateSchema, FileUpdateSchema, FileDeleteSchema]):
+        path = self.path.joinpath(data.uuid.hex)
         if data.uuid not in self.state.keys():
-            lock = self.state[data.uuid] = ([], InterProcessLock(self.path.joinpath(data.uuid.hex)))
+            lock = InterProcessLock(path.with_suffix(".lock"))
+            self.state[data.uuid] = (None, lock)
             # TODO: add configurable timeouts
+            print(f'acquiring {data.uuid}')
             lock.acquire()
 
-        # Lock acquired
-        self.state[data.uuid][0].append(data)
+        exists = self._exists(data.uuid)
+        if isinstance(data, FileCreateSchema) and exists:
+            raise ValueError(f"File {path} already exists")
+        elif isinstance(data, (FileUpdateSchema, FileDeleteSchema,)) and not exists:
+            raise ValueError(f"File {path} does not exist")
 
-    # Although commit is supposed to not fail, in the case that it does, the process
-    # (e.g. a web server) should still remain alive.  We therefore need to rollback
-    # as best we can, by releasing all the locks and then reporting the error.
+        # Lock acquired
+        self.state[data.uuid] = (data, self.state[data.uuid][1])
+
+    # This commit isn't supposed to fail, because it's not supposed to enforce
+    # whether files do/don't exist prior to being created/deleted/updated
+    # It's permissible for a file being "deleted" to not exist (it may have
+    # started by not existing, and then an intermediate but non-committed create operation occurred).
+    # Similarly, an update operation may be working on a file that doesn't actually exist.
+    # This can also occur for create operations - the file exists, and then an
+    # intermediate but non-committed delete operation is added.
+
+    # Commit can fail, however, if underlying guarantees about the filesystem
+    # are violated (e.g. another program changes one of our file's permissions)
+    # In this case, the process (e.g. a web server) should still remain alive.
+    # We therefore need to rollback as best we can, by releasing all the locks
+    # and then reporting the error.
     def commit(self):
-        print("writing files...")
-        # TODO: actually write the files
-        for (operations, lock) in self.state.values():
-            for operation in operations:
-                path = self.path.joinpath(operation.uuid.hex)
-                if isinstance(operation, FileCreateSchema):
-                    try:
-                        with open(path, "xb") as f:
-                            f.write(operation.file)
-                    except Exception as e:
-                        self.rollback()
-                        raise e
-                elif isinstance(operation, FileUpdateSchema):
-                    # Assert that the file already exists
-                    if not path.is_file():
-                        # TODO: check this is the correct error message
-                        raise FileNotFoundError(f"Can't update non-existant file {path}")
-                    try:
-                        with open(self.path.joinpath(operation.uuid.hex), "wb") as f:
-                            f.write(operation.file)
-                    except Exception as e:
-                        self.rollback()
-                        raise e
-                elif isinstance(operation, FileDeleteSchema):
-                    path.unlink()
-                else:
+        for (operation, lock) in self.state.values():
+            path = self.path.joinpath(operation.uuid.hex)
+            if isinstance(operation, (FileCreateSchema, FileUpdateSchema,)):
+                try:
+                    with open(path, "wb") as f:
+                        f.write(operation.file.read())
+                except Exception as e:
                     self.rollback()
-                    assert(False)
-            lock.release()
+                    raise e
+                lock.release()
+            elif isinstance(operation, FileDeleteSchema):
+                path.unlink(missing_ok=True)
+                lock.release()
+                # Purge old lock files
+                path.with_suffix(".lock").unlink(missing_ok=True)
 
     def rollback(self):
-        for (_, lock) in self.state:
+        for k, (_, lock) in self.state.items():
             lock.release()
+        self.state = {}
 
-    def query(self, FileReadSchema):
-        if data.uuid not in self.state.keys():
-            lock = self.state[data.uuid] = ([], InterProcessLock(self.path.joinpath(data.uuid.hex)))
+    def _exists(self, uuid: UUID):
+        path = self.path.joinpath(uuid.hex)
+        if path.exists() and not path.is_file():
+            raise ValueError(f"path {path} exists but is not a file")    # TODO: different error
+        try:
+            return isinstance(self.state[uuid][0], (FileCreateSchema, FileUpdateSchema,))
+        except KeyError:
+            return path.is_file()
+
+    def query(self, data: Union[FileReadSchema, UUID]):
+        uuid = data.uuid if isinstance(data, FileReadSchema) else data
+        if uuid not in self.state.keys():
+            lock = self.state[uuid] = (None, InterProcessLock(self.path.joinpath(uuid.hex).with_suffix(".lock")))
             # TODO: add configurable timeouts
             lock.acquire_lock()
-        return open(self.path.joinpath(data.uuid.hex))
+
+        # Find the last point at which the file was created or updated
+        path = self.path.joinpath(uuid.hex)
+        if path.exists() and not path.is_file():
+            raise ValueError(f"path {path} exists but is not a file")    # TODO: different error
+
+        if uuid in self.state.keys() and self.state[uuid][0] is not None:
+            return self.state[uuid][0]
+        else:
+            return open(self.path.joinpath(uuid.hex))
 
 
 @dataclass(frozen=True)
@@ -204,32 +228,44 @@ class LocalFileCRUDBackend(FileCRUDBackend):
         super().__init__()
 
     def create(self, session: FileSession, data: FileCreateSchema) -> UUIDReturnSchema:
-        filepath = self.path.joinpath(data.uuid.hex)
-        if filepath.exists():
-            raise ValueError(f"File at {filepath} already exists")
-        with open(filepath, "wb") as f:
-            f.write(data.file.read())
-        data.file.close()
+        session.add(data)
         return UUIDReturnSchema(uuid=data.uuid)
 
     def read(self, session: FileSession, data: FileReadSchema) -> FileReturnSchema:
-        return FileReturnSchema(
-            uuid = data.uuid,
-            file = open(self.path.joinpath(data.uuid.hex), "rb"))
+        return session.query(data)
 
     def update(self, session: FileSession, data: FileUpdateSchema) -> None:
-        filepath = self.path.joinpath(data.uuid.hex)
-        if not filepath.exists():
-            raise ValueError(f"File at {filepath} does not exist")
-        with open(filepath, "wb") as f:
-            f.write(data.file.read())
-        data.file.close()
+        session.add(data)
 
     def delete(self, session: FileSession, data: FileDeleteSchema) -> None:
-        self.path.joinpath(data.uuid.hex).unlink()
+        session.add(data)
 
     def _generate_session(self) -> FileSession:
         """
         Generate a new session in case the user didn't specify one yet
         """
         return FileSession(self.path)
+
+
+# Provides a way of verifying that the uploaded file is, in fact, an image
+# Also provides a way of processing the image prior to storage (e.g. to create a thumbnail)
+# TODO: think about whether we actually want a media storage backend?
+# It could have swappable parts to verify that it's video or audio or something
+
+# We could build a backend router that looks at the schema type and routes accordingly
+# to the backend of choice.  A generic one may well auto-implement for all of the possible
+# actions, such as CRUD.
+
+# Resources to build:
+# * router backend - looks at the schema type and routes accordingly
+#       Used to distinguishing video, image, sound, etc.
+# * tee backend - sends the same stuff to multiple resources
+#       Used to implement images + thumbnails being stored
+# * splitter backend - looks at a key in a dict, and routes (to multiple) accordingly
+#       Used to implement combined requests (e.g. update image file and database)
+# * image backend - verifies that the file being sent to the backend is actually an image
+#       Video, audio, etc. respective ones
+#       Maybe this could instead be a generic file type checker?
+#           Probably not, because we want to inspect the files, not just their extensions
+# * image compressor backend
+#       Used to actually make the thumbnails
