@@ -21,20 +21,26 @@ class Action(Enum):
     DENY = auto()
 
 
-class BaseAccessType(Enum):
+class BaseAccessType(str, Enum):
     """
     Base type for accesses.
     """
     ...
 
 
-@dataclass(frozen=True)
+# This dataclass can't be frozen, because it's required down the line by pydantic
+# TODO: actually write a mutable version for pydantic's sake
+@dataclass
 class Principal:
     """
     Encodes the groups or roles of a given user
     """
     method: Any
     value: Any
+
+@dataclass
+class Test:
+    i: int
 
 
 @dataclass(frozen=True)

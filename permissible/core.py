@@ -100,7 +100,8 @@ class Backend(Generic[AccessType]):
     which define the possible interactions with the backend's data store.
     """
 
-    _access_records: Dict[AccessType, BackendAccessRecord] = {}
+    # Indexing by AccessType to speed up lookups by Resources
+    access_records: Dict[AccessType, BackendAccessRecord] = {}
     _access_methods: \
         Dict[AccessType,
              Callable[[Any, BaseSession], OutputSchema]] = {}
@@ -131,7 +132,7 @@ class Backend(Generic[AccessType]):
         print("adding access records")
         for r in recs:
             print(f"{r.type_}")
-            self._access_records[r.type_] = r
+            self.access_records[r.type_] = r
             self._access_methods[r.type_] = self._register_access(r)
 
     async def __call__(self, type_: AccessType, data: Any,
@@ -167,7 +168,7 @@ class AccessRecord(
     An input argument to a Resource, defining a new type of access.
 
     This access is identified by name, and is callable only by users who
-    fulfil permissions.
+    fulfil its permissions.
 
     The access expects data of type input_schema, which is processed
     by pre_process before being passed to the backend of the Resource.
@@ -196,7 +197,8 @@ class Resource(Generic[AccessType]):
     """
 
     _backend: Backend
-    _access_records: Dict[AccessType, Dict[AccessName, AccessRecord]] = \
+    # Indexing by AccessType and AccessName to speed up lookups by Resources and callers
+    access_records: Dict[AccessType, Dict[AccessName, AccessRecord]] = \
         defaultdict(dict)
     _access_methods: \
         Dict[
@@ -278,14 +280,19 @@ class Resource(Generic[AccessType]):
         recs, in accordance with AccessType
         """
         for r in recs:
-            self._access_records[r.type_][r.name] = r
+            self.access_records[r.type_][r.name] = r
             method = self._register_access(r)
             self._access_methods[r.type_][r.name] = method
         self._backend = backend
 
-    async def __call__(self, type_: AccessType, name: AccessName, data: Any,
-                 principals: List[Principal],
-                 transaction: Optional[Transaction] = None) -> OutputSchema:
+    async def __call__(
+            self,
+            type_: AccessType,
+            name: AccessName,
+            data: Any,
+            principals: List[Principal],
+            transaction: Optional[Transaction] = None
+        ) -> OutputSchema:
         """
         Invoke an access on data of the given type and name, on a user with
         the given principals within the context of the transaction.

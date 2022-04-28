@@ -55,6 +55,9 @@ ProfileResource = CRUDResource(
         ),
         backend=ProfileBackend
     )
+
+import pdb
+pdb.set_trace()
 async def main():
     # Invoke admin_create to create a new profile as an administrative user
     await ProfileResource.create(

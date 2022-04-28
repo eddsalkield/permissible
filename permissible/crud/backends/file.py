@@ -6,10 +6,9 @@ from os import PathLike
 
 from pydantic import BaseModel, Field
 from permissible.core import BaseSession, InputSchema, OutputSchema
-from permissible.crud.core import CRUDBackend, CreateSchema, ReadSchema, \
-        UpdateSchema, DeleteSchema, CRUDAccessType, CRUDBackendAccessRecord, \
+from permissible.crud.core import CRUDBackend, CRUDAccessType, CRUDBackendAccessRecord, \
         Create, Read, Update, Delete
-from io import BufferedReader
+from io import IOBase
 from uuid import UUID, uuid4
 from dataclasses import dataclass
 from fasteners import InterProcessLock
@@ -17,7 +16,7 @@ from fasteners import InterProcessLock
 
 class FileCreateSchema(BaseModel):
     uuid: UUID = Field(default_factory=uuid4)
-    file: BufferedReader
+    file: IOBase
     class Config:
         arbitrary_types_allowed = True
 
@@ -28,7 +27,7 @@ class FileReadSchema(BaseModel):
 
 class FileUpdateSchema(BaseModel):
     uuid: UUID
-    file: BufferedReader
+    file: IOBase
     class Config:
         arbitrary_types_allowed = True
 
@@ -43,7 +42,7 @@ class UUIDReturnSchema(BaseModel):
 
 class FileReturnSchema(BaseModel):
     uuid: UUID
-    file: BufferedReader
+    file: IOBase
     class Config:
         arbitrary_types_allowed = True
 
@@ -201,17 +200,17 @@ class FileCRUDBackend(
                 UUIDReturnSchema,
                 self.create,
                 CRUDAccessType.create),
-            CRUDBackendAccessRecord[ReadSchema, FileReturnSchema](
+            CRUDBackendAccessRecord[FileReadSchema, FileReturnSchema](
                 FileReadSchema,
                 FileReturnSchema,
                 self.read,
                 CRUDAccessType.read),
-            CRUDBackendAccessRecord[UpdateSchema, None](
+            CRUDBackendAccessRecord[FileUpdateSchema, None](
                 FileUpdateSchema,
                 None,
                 self.update,
                 CRUDAccessType.update),
-            CRUDBackendAccessRecord[DeleteSchema, None](
+            CRUDBackendAccessRecord[FileDeleteSchema, None](
                 FileDeleteSchema,
                 None,
                 self.delete,

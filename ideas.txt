@@ -19,3 +19,9 @@ Resources to build:
 		  Probably not, because we want to inspect the files, not just their extensions
 	* image compressor backend
 	      Used to actually make the thumbnails
+
+How to render the admin panel
+* Parse the openapi spec, looking for parameters tagged according to a list on the client
+* Identify which of these parameters correspond to each of the CRUD operations
+	Ideally using the HTTP methods, if this works out with GET's restrictions
+* Render a row in the table for each
